@@ -591,6 +591,8 @@
 	// Menu items
 	const menuItems = [
             { text: "Toggle Grid", action: () => { MetricGrid.toggle(); menuTip.hide(); } },
+	    { text: "Video (Inset)", action: () => { window.VideoPanel?.toggle(); menuTip.hide(); }},
+	    { text: "Video (New Window)", action: () => { window.VideoPanel?.openNewWindow(); menuTip.hide(); }},
             { text: "Messages", action: () => { StatusLog.open(menuBtn); menuTip.hide(); } },
             { text: "Fetch Fence", action: () => { fetchFence(); menuTip.hide(); }},
             { text: "Fence Disable", action: () => { fenceDisable(); menuTip.hide(); }},
