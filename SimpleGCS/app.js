@@ -1,5 +1,5 @@
 /*
-  app.js — Simple, mobile-friendly GCS map for autonomous buoys
+  app.js - Simple, mobile-friendly GCS map for autonomous buoys
 */
 
 (() => {
@@ -855,7 +855,7 @@
 	};
 
 	// preload saved values (fallbacks preserved)
-	url_input.value = localStorage.getItem(LS_KEYS.url) || "ws://127.0.0.1:56781";
+	url_input.value = localStorage.getItem(LS_KEYS.url) || "wss://support.ardupilot.org:11099";
 	passphrase_input.value = localStorage.getItem(LS_KEYS.pass) || "";
 
 
