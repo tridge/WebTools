@@ -54,6 +54,9 @@
     let intentionalDisconnect = false;
     let lastConnectionUrl = null;
 
+    // dictionary of all received messages
+    let messages = {};
+
     const roverModes = {
         MANUAL       : 0,
         ACRO         : 1,
@@ -825,6 +828,17 @@
 		    // Learn target addresses
 		    if (typeof m.sysid === "number") vehSysId = m.sysid;
 		    if (typeof m.compid === "number") vehCompId = m.compid;
+
+		    // update messages dictionary
+		    if (!(vehSysId in messages)) {
+			messages[vehSysId] = {};
+		    }
+		    messages[vehSysId][m._name] = m;
+		    if (m._instance_field !== undefined) {
+			// handle multi-instance messages
+			var instance_value = m[m._instance_field];
+			messages[vehSysId][m._name + "[" + instance_value + "]"] = m;
+		    }
 
 		    // HEARTBEAT => vehicle type
 		    if (m._name === "HEARTBEAT") {
