@@ -20,6 +20,9 @@
     // add a scale bar
     L.control.scale({ position: 'bottomright', imperial: false, maxWidth: 300 }).addTo(map);
 
+    // init UserLocation
+    UserLocation.init(map, { autoCenterFirstFix: true });
+
     // --- Light yellow metric grid overlay (powers of 10 meters) ---
     const MetricGrid = (() => {
 	let enabled = false;
@@ -594,7 +597,8 @@
 	    { text: "Video (Inset)", action: () => { window.VideoPanel?.toggle(); menuTip.hide(); }},
 	    { text: "Video (New Window)", action: () => { window.VideoPanel?.openNewWindow(); menuTip.hide(); }},
             { text: "Messages", action: () => { StatusLog.open(menuBtn); menuTip.hide(); } },
-            { text: "Fetch Fence", action: () => { fetchFence(); menuTip.hide(); }},
+	    { text: "My Location", action: () => { UserLocation.toggle(); menuTip.hide(); } },
+	    { text: "Fetch Fence", action: () => { fetchFence(); menuTip.hide(); }},
             { text: "Fence Disable", action: () => { fenceDisable(); menuTip.hide(); }},
             { text: "Fence Enable", action: () => { fenceEnable(); menuTip.hide(); }},
             { text: "Reboot", action: () => { sendReboot(); menuTip.hide(); }},
