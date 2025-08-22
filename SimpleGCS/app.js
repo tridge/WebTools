@@ -26,6 +26,9 @@
     // optional grid overlay
     MetricGrid.init(map); // optional opts: { color: 'rgba(255,235,59,.6)', targetPx: 150, lineWidth: 1 }
 
+    // setup fence code
+    Fence.init({ map, MAVLink, toast, sendCommandInt });
+
     // prevent iPhone popup menus
     map.getContainer().addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -317,92 +320,6 @@
     // setup the menu
     initMenuButton();
 
-    // Fence handling
-    let ftp = null;
-    let fenceParser = new FenceParser();
-    let fenceLayers = [];
-    let fenceFetched = false;
-    let fenceRetryInterval = null;
-
-    // Initialize FTP when connected
-    function initFTP() {
-	if (ws && ws.readyState === WebSocket.OPEN) {
-	    ftp = new MAVFTP(MAVLink, ws);
-	    ftp.targetSystem = vehSysId;
-	    ftp.targetComponent = vehCompId;
-	    console.log("FTP initialized");
-	}
-    }
-
-    // Start fence fetch retry loop
-    function startFenceFetchRetry() {
-	// Clear any existing interval
-	if (fenceRetryInterval) {
-	    clearInterval(fenceRetryInterval);
-	}
-
-	// Reset fence fetched flag
-	fenceFetched = false;
-
-	// Try to fetch immediately
-	fetchFence(true); // true = silent mode
-
-	// Retry every 5 seconds until successful
-	fenceRetryInterval = setInterval(() => {
-	    if (!fenceFetched && ftp) {
-		console.log("Retrying fence fetch...");
-		fetchFence(true); // silent retry
-	    } else if (fenceFetched) {
-		// Stop retrying once we have the fence
-		clearInterval(fenceRetryInterval);
-		fenceRetryInterval = null;
-	    }
-	}, 5000);
-    }
-
-    // Stop fence fetch retry loop
-    function stopFenceFetchRetry() {
-	if (fenceRetryInterval) {
-	    clearInterval(fenceRetryInterval);
-	    fenceRetryInterval = null;
-	}
-    }
-
-    // Fetch fence from vehicle
-    function fetchFence(silent = false) {
-	if (!ftp) {
-	    if (!silent) toast("Not connected");
-	    return;
-	}
-
-	if (!silent) toast("Fetching fence...");
-
-	ftp.getFile("@MISSION/fence.dat", (data) => {
-	    if (!data) {
-		if (!silent) toast("Failed to fetch fence");
-		return;
-	    }
-
-	    const fences = fenceParser.parse(data);
-	    if (fences) {
-		displayFences(fences);
-		console.log(`Loaded ${fences.length} fence items`);
-		if (!silent) toast(`Loaded ${fences.length} fence items`);
-		fenceFetched = true; // Mark as successfully fetched
-		stopFenceFetchRetry(); // Stop retrying
-	    } else {
-		if (!silent) toast("Failed to parse fence");
-	    }
-	});
-    }
-
-    function fenceDisable() {
-	sendCommandInt(mavlink20.MAV_CMD_DO_FENCE_ENABLE, [ 0 ]);
-    }
-    function fenceEnable() {
-	sendCommandInt(mavlink20.MAV_CMD_DO_FENCE_ENABLE, [ 1 ]);
-    }
-
     function sendReboot() {
 	sendCommandInt(mavlink20.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, [1])
     }
@@ -447,9 +364,9 @@
 	    { text: "Video (New Window)", action: () => { window.VideoPanel?.openNewWindow(); menuTip.hide(); }},
             { text: "Messages", action: () => { StatusLog.open(menuBtn); menuTip.hide(); } },
 	    { text: "My Location", action: () => { UserLocation.toggle(); menuTip.hide(); } },
-	    { text: "Fetch Fence", action: () => { fetchFence(); menuTip.hide(); }},
-            { text: "Fence Disable", action: () => { fenceDisable(); menuTip.hide(); }},
-            { text: "Fence Enable", action: () => { fenceEnable(); menuTip.hide(); }},
+	    { text: "Fetch Fence", action: () => { Fence.fetch(); menuTip.hide(); }},
+	    { text: "Fence Disable", action: () => { Fence.disable(); menuTip.hide(); }},
+	    { text: "Fence Enable", action: () => { Fence.enable(); menuTip.hide(); }},
             { text: "Reboot", action: () => { sendReboot(); menuTip.hide(); }},
             { text: "ForceDisarm", action: () => { sendForceDisarm(); menuTip.hide(); }},
             { text: "ForceArm", action: () => { sendForceArm(); menuTip.hide(); }},
@@ -486,61 +403,6 @@
 	});
 
 	return menuBtn;
-    }
-
-    // Display fences on map
-    function displayFences(fences) {
-	// Clear existing fence layers
-	fenceLayers.forEach(layer => map.removeLayer(layer));
-	fenceLayers = [];
-
-	fences.forEach((fence, idx) => {
-	    let layer = null;
-
-	    if (fence.type === mavlink20.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION) {
-		// Circle inclusion (green)
-		layer = L.circle([fence.center.lat, fence.center.lng], {
-		    radius: fence.radius,
-		    color: '#4caf50',
-		    fillColor: '#4caf50',
-		    fillOpacity: 0,
-		    weight: 2
-		}).addTo(map);
-		layer.bindPopup(`Circle Inclusion #${idx}<br>Radius: ${fence.radius}m`);
-
-	    } else if (fence.type === mavlink20.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION) {
-		// Circle exclusion (red)
-		layer = L.circle([fence.center.lat, fence.center.lng], {
-		    radius: fence.radius,
-		    color: '#f44336',
-		    fillColor: '#f44336',
-		    fillOpacity: 0,
-		    weight: 2
-		}).addTo(map);
-	    } else if (fence.type === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION) {
-		// Polygon inclusion (green)
-		const latlngs = fence.vertices.map(v => [v.lat, v.lng]);
-		layer = L.polygon(latlngs, {
-		    color: '#4caf50',
-		    fillColor: '#4caf50',
-		    fillOpacity: 0,
-		    weight: 2
-		}).addTo(map);
-	    } else if (fence.type === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION) {
-		// Polygon exclusion (red)
-		const latlngs = fence.vertices.map(v => [v.lat, v.lng]);
-		layer = L.polygon(latlngs, {
-		    color: '#f44336',
-		    fillColor: '#f44336',
-		    fillOpacity: 0,
-		    weight: 2
-		}).addTo(map);
-	    }
-
-	    if (layer) {
-		fenceLayers.push(layer);
-	    }
-	});
     }
 
     function classifyVehicle(mavType) {
@@ -789,8 +651,7 @@
 
 		toast("Connected");
 		startHeartbeatLoop();
-		initFTP();
-		startFenceFetchRetry();
+		Fence.onConnected(ws, vehSysId, vehCompId);
 	    };
 
 	    ws.onerror = (error) => {
@@ -805,7 +666,7 @@
 		    clearInterval(hbInterval);
 		    hbInterval = null;
 		}
-		stopFenceFetchRetry();
+		Fence.onDisconnected();
 
 		// Only attempt reconnect if it wasn't an intentional disconnect
 		if (!intentionalDisconnect) {
@@ -828,6 +689,8 @@
 		    // Learn target addresses
 		    if (typeof m.sysid === "number") vehSysId = m.sysid;
 		    if (typeof m.compid === "number") vehCompId = m.compid;
+
+		    Fence.setTargets(vehSysId, vehCompId);
 
 		    // update messages dictionary
 		    if (!(vehSysId in messages)) {
@@ -874,8 +737,8 @@
 		    }
 
 		    // Handle FTP messages
-		    if (ftp && m._name === "FILE_TRANSFER_PROTOCOL") {
-			ftp.handleMessage(m);
+		    if (m._name === "FILE_TRANSFER_PROTOCOL") {
+			Fence.handleMessage(m);
 		    }
 
 		    // BATTERY_STATUS => battery percentage
