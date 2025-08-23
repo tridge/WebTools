@@ -823,6 +823,14 @@
 			updateTelemetryDisplay();
 		    }
 
+		    // SYS_STATUS => sensor state
+		    if (m._name === "SYS_STATUS") {
+			const sensors_present = m.onboard_control_sensors_present;
+			const sensors_enabled = m.onboard_control_sensors_enabled;
+			const sensors_health = m.onboard_control_sensors_health;
+			Fence.setEnabled((sensors_enabled & mavlink20.MAV_SYS_STATUS_GEOFENCE) != 0);
+		    }
+		    
 		    if (m._name === "POSITION_TARGET_GLOBAL_INT") {
 			if (m.lat_int !== 0 || m.lon_int !== 0) {
 			    const lat = m.lat_int / 1e7;
