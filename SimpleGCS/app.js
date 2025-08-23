@@ -78,6 +78,26 @@
         INITIALISING : 16,
     };
 
+    // MCCMNC → human label (AU big 3 + major UK carriers)
+    const MCCMNC_MAP = {
+	// Australia
+	50501: "AU Telstra",
+	50502: "AU Optus",
+	50503: "AU Vodafone",
+
+	// United Kingdom (common MNCs)
+	23410: "UK O2",
+	23411: "UK O2",
+	23402: "UK O2",          // legacy/alt O2 code seen in field
+	23415: "UK Vodafone",
+	23420: "UK Three",
+	23430: "UK EE (T-Mobile)",
+	23433: "UK EE (Orange)",
+	23431: "UK EE",
+	23432: "UK EE",
+	23434: "UK EE"
+    };
+    
     // --- Helpers ---
     function toast(msg, ms=1500) {
 	const el = document.createElement("div");
@@ -85,6 +105,12 @@
 	el.textContent = msg;
 	document.body.appendChild(el);
 	setTimeout(() => el.remove(), ms);
+    }
+
+    function mavStr(chars) {
+	if (typeof chars === "string") return chars.replace(/\0+$/, "");
+	if (Array.isArray(chars)) return String.fromCharCode(...chars).replace(/\0+$/, "");
+	return String(chars || "").replace(/\0+$/, "");
     }
 
     // --- COMMAND_INT helper ---
@@ -176,12 +202,25 @@
 	    <div id="speed-value" style="font-size: 14px; font-weight: bold;">--- knots</div>
 	`;
 
+	// LTE display
+	const lteDiv = document.createElement("div");
+	lteDiv.id = "lte-display";
+	lteDiv.style.cssText = "margin-top: 6px;";
+	lteDiv.innerHTML = `
+  <div style="opacity:.7; margin-bottom:2px;">LTE</div>
+  <div id="lte-carrier" style="font-size:13px; font-weight:600;">—</div>
+  <div id="lte-rsrp" style="font-size:12px; opacity:.85;">— dBm</div>
+`;
+
 	telemetryDiv.appendChild(batteryDiv);
 	telemetryDiv.appendChild(speedDiv);
+	telemetryDiv.appendChild(lteDiv);
 
 	// Insert before the flex spacer
 	const spacer = toolbar.querySelector('div[style*="flex:1"]');
 	toolbar.insertBefore(telemetryDiv, spacer);
+
+
     }
 
     function updateTelemetryDisplay() {
@@ -530,6 +569,38 @@
 	}
     }
 
+    function updateLTE() {
+	const carrierEl = document.getElementById("lte-carrier");
+	const rsrpEl = document.getElementById("lte-rsrp");
+	if (!carrierEl || !rsrpEl) return;
+
+	const sys = vehSysId;
+	sysmsgs = messages[sys];
+	if (!sysmsgs) return;
+
+	const nvf_mcc = sysmsgs["NAMED_VALUE_FLOAT[LTE_MCCMNC]"];
+	const nvf_rsrp = sysmsgs["NAMED_VALUE_FLOAT[LTE_RSRP]"];
+
+	// Carrier
+	let carrierTxt = "—";
+	if (nvf_mcc && typeof nvf_mcc.value === "number") {
+	    const code = Math.round(nvf_mcc.value);
+	    carrierTxt = MCCMNC_MAP[code] || String(code);
+	}
+	carrierEl.textContent = carrierTxt;
+
+	// RSRP (0.1 dB units → dBm)
+	let rsrpTxt = "— dBm";
+	if (nvf_rsrp && typeof nvf_rsrp.value === "number") {
+	    const dbm = nvf_rsrp.value / 10.0; // e.g. -1045 → -104.5
+	    rsrpTxt = `${dbm.toFixed(1)} dBm`;
+	}
+	rsrpEl.textContent = rsrpTxt;
+    }
+
+    // refresh every second
+    setInterval(updateLTE, 1000);
+    
     // remove the target marker when not needed:
     function clearTargetPosition() {
 	if (targetMarker) {
@@ -698,6 +769,14 @@
 			messages[vehSysId] = {};
 		    }
 		    messages[vehSysId][m._name] = m;
+
+		    const trimNuls = v => (typeof v === "string" ? v.replace(/\0+$/, "") : v);
+
+		    if (m._instance_field !== undefined) {
+			let instance_value = trimNuls(m[m._instance_field]);
+			messages[vehSysId][`${m._name}[${instance_value}]`] = m;
+		    }
+
 		    if (m._instance_field !== undefined) {
 			// handle multi-instance messages
 			var instance_value = m[m._instance_field];
