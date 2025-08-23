@@ -758,33 +758,27 @@
 		    if (m === null) break;
 		    if (m._id == -1) continue;
 
-		    // Learn target addresses
-		    if (typeof m.sysid === "number") vehSysId = m.sysid;
-		    if (typeof m.compid === "number") vehCompId = m.compid;
-
-		    Fence.setTargets(vehSysId, vehCompId);
-
 		    // update messages dictionary
-		    if (!(vehSysId in messages)) {
-			messages[vehSysId] = {};
+		    if (!(m.sysid in messages)) {
+			messages[m.sysid] = {};
 		    }
-		    messages[vehSysId][m._name] = m;
+		    messages[m.sysid][m._name] = m;
 
 		    const trimNuls = v => (typeof v === "string" ? v.replace(/\0+$/, "") : v);
 
 		    if (m._instance_field !== undefined) {
 			let instance_value = trimNuls(m[m._instance_field]);
-			messages[vehSysId][`${m._name}[${instance_value}]`] = m;
-		    }
-
-		    if (m._instance_field !== undefined) {
-			// handle multi-instance messages
-			var instance_value = m[m._instance_field];
-			messages[vehSysId][m._name + "[" + instance_value + "]"] = m;
+			messages[m.sysid][`${m._name}[${instance_value}]`] = m;
 		    }
 
 		    // HEARTBEAT => vehicle type
-		    if (m._name === "HEARTBEAT") {
+		    if (m._name === "HEARTBEAT" && m.autopilot == mavlink20.MAV_AUTOPILOT_ARDUPILOTMEGA) {
+
+			// Learn target addresses
+			vehSysId = m.sysid;
+			vehCompId = m.compid;
+			Fence.setTargets(vehSysId, vehCompId);
+
 			VehicleType.mavType = m.type;
 			VehicleType.cls = classifyVehicle(m.type);
 			VehicleType.lastSeen = Date.now();
