@@ -839,6 +839,27 @@
 	disconnect_btn.onclick = () => {
 	    disconnect(true); // Explicitly mark as intentional
 	};
+
+	// --- Auto-connect on first load to cached or default URL/passphrase ---
+	(function tryAutoConnectOnce() {
+	    const SEEN_FLAG = 'gcs.autoconnect.done';
+	    const noAuto = /(?:^|\?|&)noautoconnect=1(?:$|&)/.test(window.location.search);
+	    if (noAuto) return;
+
+	    // Only auto-connect the very first time this app is opened in this browser
+	    if (!localStorage.getItem(SEEN_FLAG)) {
+		// Persist whatever the dialog preloaded (cached or defaults)
+		localStorage.setItem(LS_KEYS.url, (url_input.value || '').trim());
+		const pass = (passphrase_input.value || '').trim();
+		if (pass.length) localStorage.setItem(LS_KEYS.pass, pass);
+
+		// Go!
+		connect(url_input.value);
+
+		// Mark as done so we don't auto-connect on every subsequent load
+		localStorage.setItem(SEEN_FLAG, '1');
+	    }
+	})();
     })();
 
     // Buttons
