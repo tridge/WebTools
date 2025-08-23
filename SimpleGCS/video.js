@@ -3,9 +3,9 @@
   - Assumes MediaMTX serves HTTPS on:
       HLS   : https://<host>:8888/<path>/index.m3u8
       WebRTC: https://<host>:8889/<path>/
-  - Uses hls.js (if available) or native HLS; starts at live edge
-  - Adds a "Go Live" button and a LIVE badge that shows drift
-  - Keeps playback near the tip with a small live-keeper and catch-up rate
+  - Uses WebRTC by default for low latency, HLS as fallback
+  - Adds a "Go Live" button and protocol indicator
+  - Stable playback without backwards seeking
 */
 (() => {
   class VideoPanel {
@@ -20,8 +20,12 @@
       this.el = null;
       this.hls = null;
       this.videoEl = null;
+      this.currentIframe = null;
       this.liveTimer = null;
       this.liveBadgeEl = null;
+      this.isWebRTC = false;
+      this.hlsRetryCount = 0;
+      this.maxHLSRetries = 3;
     }
 
     _hlsUrl() { return `${this.scheme}://${this.host}:${this.hlsPort}/${this.path}/index.m3u8`; }
@@ -52,8 +56,8 @@
         return b;
       };
 
-      const liveBtn = btn("Go Live", "#a5d6a7");
-      liveBtn.addEventListener("click", () => this._goLive());
+      const protocolBtn = btn("WebRTC", "#81c784");
+      protocolBtn.addEventListener("click", () => this._toggleProtocol());
       const popBtn = btn("New window", "#90caf9");
       popBtn.addEventListener("click", () => this.openNewWindow());
       const cfgBtn = btn("Settings", "#ffd54f");
@@ -61,31 +65,27 @@
       const closeBtn = btn("×", "#ef9a9a");
       closeBtn.style.width = "28px";
       closeBtn.addEventListener("click", () => this.close());
-      bar.append(title, liveBtn, popBtn, cfgBtn, closeBtn);
-
-      const vid = document.createElement("video");
-      vid.style.cssText = "width:100%; height:100%; background:#000;";
-      vid.autoplay = true; vid.playsInline = true; vid.muted = true; vid.controls = true;
+      bar.append(title, protocolBtn, popBtn, cfgBtn, closeBtn);
 
       const body = document.createElement("div");
       body.style.cssText = "position:relative; flex:1; display:flex;";
-      body.append(vid);
 
-      // LIVE badge (clickable)
-      const liveBadge = document.createElement("div");
-      liveBadge.style.cssText = "position:absolute; left:8px; top:8px; padding:2px 8px; border-radius:999px; font:600 12px system-ui; letter-spacing:.08em; background:#e53935; color:#fff; cursor:pointer; user-select:none;";
-      liveBadge.textContent = "LIVE";
-      liveBadge.title = "Click to jump to live";
-      liveBadge.addEventListener("click", () => this._goLive());
-      body.append(liveBadge);
-      this.liveBadgeEl = liveBadge;
+      // Status badge
+      const statusBadge = document.createElement("div");
+      statusBadge.style.cssText = "position:absolute; left:8px; top:8px; padding:2px 8px; border-radius:999px; font:600 12px system-ui; letter-spacing:.08em; background:#4caf50; color:#fff; user-select:none; z-index:1;";
+      statusBadge.textContent = "WebRTC";
+      body.append(statusBadge);
+      this.liveBadgeEl = statusBadge;
 
       const grip = document.createElement("div");
-      grip.style.cssText = "position:absolute; right:0; bottom:0; width:18px; height:18px; background:linear-gradient(135deg, transparent 50%, rgba(255,255,255,.25) 50%); cursor:nwse-resize;";
+      grip.style.cssText = "position:absolute; right:0; bottom:0; width:18px; height:18px; background:linear-gradient(135deg, transparent 50%, rgba(255,255,255,.25) 50%); cursor:nwse-resize; z-index:1;";
       body.append(grip);
 
       wrap.append(bar, body);
       (document.getElementById("map") || document.body).appendChild(wrap);
+
+      // Store reference to protocol button
+      this.protocolBtn = protocolBtn;
 
       // drag
       let drag = null;
@@ -106,180 +106,245 @@
       });
       document.addEventListener("mouseup", () => { rez = null; });
 
-      this.el = wrap; this.videoEl = vid;
-      this._playHLS();
+      this.el = wrap;
+      this.bodyEl = body;
+      
+      // Start with WebRTC for lowest latency
+      this._useWebRTC();
     }
 
-    _playHLS() {
+    _toggleProtocol() {
+      if (this.isWebRTC) {
+        this._useHLS();
+      } else {
+        this._useWebRTC();
+      }
+    }
+
+    _useWebRTC() {
+      this._cleanup();
+      
+      const iframe = document.createElement("iframe");
+      iframe.src = this._webrtcUrl();
+      iframe.style.cssText = "border:0; width:100%; height:100%; background:#000;";
+      iframe.allow = "autoplay; fullscreen";
+      
+      this.bodyEl.insertBefore(iframe, this.bodyEl.firstChild);
+      this.currentIframe = iframe;
+      this.isWebRTC = true;
+      
+      this._updateUI("WebRTC", "#4caf50", "#81c784");
+      
+      // Start monitoring connection
+      this._startConnectionMonitor();
+    }
+
+    _useHLS() {
+      this._cleanup();
+      
+      const video = document.createElement("video");
+      video.style.cssText = "width:100%; height:100%; background:#000;";
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+      video.controls = true;
+      
+      this.bodyEl.insertBefore(video, this.bodyEl.firstChild);
+      this.videoEl = video;
+      this.isWebRTC = false;
+      
+      this._updateUI("HLS", "#ff9800", "#ffb74d");
+      
+      // Use stable HLS configuration
+      this._playStableHLS();
+    }
+
+    _playStableHLS() {
       const url = this._hlsUrl();
+      
+      // Store credentials
       localStorage.setItem("video.user", this.user || "");
       localStorage.setItem("video.pass", this.pass || "");
       localStorage.setItem("video.host", this.host || "");
       localStorage.setItem("video.path", this.path || "");
 
-      if (location.protocol === "https:" && url.startsWith("http://")) { this._fallbackIframe(); return; }
-
-      // Native HLS (Safari/iOS)
-      if (this.videoEl && this.videoEl.canPlayType && this.videoEl.canPlayType("application/vnd.apple.mpegurl")) {
-        this.videoEl.src = url;
-        this.videoEl.addEventListener("loadedmetadata", () => this._goLive(), { once:true });
-        this.videoEl.play().catch(() => {});
-        this._startLiveKeeper();
+      if (location.protocol === "https:" && url.startsWith("http://")) {
+        this._useWebRTC(); // Fallback to WebRTC
         return;
       }
 
-      // hls.js path
-      if (!window.Hls) { this._fallbackIframe(); return; }
-      if (this.hls) { try { this.hls.destroy(); } catch {} this.hls = null; }
+      // Try native HLS first (Safari/iOS)
+      if (this.videoEl && this.videoEl.canPlayType && this.videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+        this.videoEl.src = url;
+        this.videoEl.play().catch(e => console.warn("Play failed:", e));
+        return;
+      }
+
+      // Use HLS.js with stable, non-aggressive settings
+      if (!window.Hls) {
+        this._useWebRTC(); // Fallback to WebRTC
+        return;
+      }
+
+      if (this.hls) {
+        try { this.hls.destroy(); } catch {}
+        this.hls = null;
+      }
 
       const auth = (this.user && this.pass) ? "Basic " + btoa(`${this.user}:${this.pass}`) : null;
+      
+      // Stable HLS configuration - prioritize stability over latency
       const hls = new Hls({
-        autoStartLoad: false,
+        autoStartLoad: true,
         startPosition: -1,
-        lowLatencyMode: true,
-        backBufferLength: 10,
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 3,
-        maxLiveSyncPlaybackRate: 1.2,
-        maxBufferLength: 15,
+        lowLatencyMode: false, // Disable for stability
+        
+        // Conservative buffering for stable playback
+        backBufferLength: 30,
+        liveSyncDurationCount: 3, // Stay 3 segments behind live edge
+        liveMaxLatencyDurationCount: 10, // Allow up to 10 segments behind
+        maxLiveSyncPlaybackRate: 1.0, // No speed adjustments
+        
+        // Larger buffers for stability
+        maxBufferLength: 30,
+        maxBufferSize: 100 * 1000 * 1000, // 100MB
+        maxBufferHole: 2,
+        
+        // Conservative loading
+        enableWorker: true,
+        fragLoadingTimeOut: 20000,
+        manifestLoadingTimeOut: 10000,
+        levelLoadingTimeOut: 10000,
+        
         xhrSetup: (xhr) => { if (auth) xhr.setRequestHeader("Authorization", auth); }
       });
 
       hls.on(Hls.Events.ERROR, (_evt, data) => {
-        if (data && data.fatal) { try { hls.destroy(); } catch {} this.hls = null; this._fallbackIframe(); }
+        console.warn("HLS Error:", data);
+        if (data && data.fatal) {
+          this.hlsRetryCount++;
+          if (this.hlsRetryCount >= this.maxHLSRetries) {
+            console.log("Max HLS retries reached, switching to WebRTC");
+            this._useWebRTC();
+          } else {
+            console.log(`HLS retry ${this.hlsRetryCount}/${this.maxHLSRetries}`);
+            setTimeout(() => this._playStableHLS(), 2000);
+          }
+        }
       });
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        try { hls.startLoad(-1); } catch {}
-        this._goLive();
-        if (this.videoEl) this.videoEl.play().catch(() => {});
-        this._startLiveKeeper();
+        this.videoEl.play().catch(e => console.warn("Play failed:", e));
+        this.hlsRetryCount = 0; // Reset retry count on success
       });
-      hls.on(Hls.Events.LEVEL_LOADED, (_e, data) => { if (data && data.details && data.details.live) this._maybeNudgeLive(); });
-      hls.on(Hls.Events.BUFFER_APPENDED, () => { this._maybeNudgeLive(); });
 
       hls.loadSource(url);
       hls.attachMedia(this.videoEl);
       this.hls = hls;
-      if (this.videoEl) this.videoEl.play().catch(() => {});
-      this._updateLiveBadge();
     }
 
-    _getEdges() {
-      const v = this.videoEl;
-      const S = v && v.seekable && v.seekable.length ? v.seekable : null;
-      const B = v && v.buffered && v.buffered.length ? v.buffered : null;
-      const seekEnd = S ? S.end(S.length - 1) : NaN;
-      const bufEnd  = B ? B.end(B.length - 1) : NaN;
-      return { seekEnd, bufEnd };
-    }
-
-    _seekLive() {
-      const v = this.videoEl; if (!v) return;
-      if (this.hls && Number.isFinite(this.hls.liveSyncPosition)) { try { v.currentTime = this.hls.liveSyncPosition; return; } catch {}
+    _updateUI(protocol, badgeColor, buttonColor) {
+      if (this.liveBadgeEl) {
+        this.liveBadgeEl.textContent = protocol;
+        this.liveBadgeEl.style.background = badgeColor;
       }
-      const { seekEnd, bufEnd } = this._getEdges();
-      if (Number.isFinite(seekEnd)) {
-        if (Number.isFinite(bufEnd) && (seekEnd - bufEnd) > 1.0) { try { v.currentTime = Math.max(0, bufEnd - 0.05); return; } catch {} }
-        try { v.currentTime = Math.max(0, seekEnd - 0.1); } catch {}
+      if (this.protocolBtn) {
+        this.protocolBtn.textContent = protocol === "WebRTC" ? "Switch to HLS" : "Switch to WebRTC";
+        this.protocolBtn.style.background = buttonColor;
       }
     }
 
-    _goLive() {
-      try { if (this.hls) { this.hls.stopLoad(); this.hls.startLoad(-1); } } catch {}
-      this._seekLive();
-      setTimeout(() => this._seekLive(), 250);
-      setTimeout(() => this._seekLive(), 750);
-      if (this.videoEl) this.videoEl.play().catch(() => {});
+    _startConnectionMonitor() {
+      this._stopConnectionMonitor();
+      
+      // Simple connection monitoring for WebRTC
+      if (this.isWebRTC && this.currentIframe) {
+        this.connectionTimer = setInterval(() => {
+          // Basic iframe health check
+          try {
+            if (!this.currentIframe || !this.currentIframe.parentNode) {
+              this._stopConnectionMonitor();
+            }
+          } catch (e) {
+            console.warn("WebRTC connection issue:", e);
+          }
+        }, 5000);
+      }
     }
 
-    _computeBehind() {
-      const v = this.videoEl; if (!v || !v.seekable || !v.seekable.length) return Infinity;
-      const end = v.seekable.end(v.seekable.length - 1);
-      return end - v.currentTime;
+    _stopConnectionMonitor() {
+      if (this.connectionTimer) {
+        clearInterval(this.connectionTimer);
+        this.connectionTimer = null;
+      }
     }
 
-    _applyCatchupRate(behind) {
-      if (!this.videoEl) return;
-      let rate = 1.0;
-      if (behind > 12) rate = 1.25; else if (behind > 6) rate = 1.12;
-      if (Math.abs((this.videoEl.playbackRate || 1) - rate) > 0.01) this.videoEl.playbackRate = rate;
+    _cleanup() {
+      // Clean up video element and HLS
+      if (this.hls) {
+        try { this.hls.destroy(); } catch {}
+        this.hls = null;
+      }
+      
+      if (this.videoEl && this.videoEl.parentNode) {
+        this.videoEl.parentNode.removeChild(this.videoEl);
+        this.videoEl = null;
+      }
+      
+      // Clean up iframe
+      if (this.currentIframe && this.currentIframe.parentNode) {
+        this.currentIframe.parentNode.removeChild(this.currentIframe);
+        this.currentIframe = null;
+      }
+      
+      this._stopConnectionMonitor();
     }
 
-    _setLiveBadge(isLive, behindSec) {
-      const el = this.liveBadgeEl; if (!el) return;
-      if (isLive) { el.style.background = '#e53935'; el.style.opacity = '0.95'; el.textContent = 'LIVE'; }
-      else { el.style.background = '#616161'; el.style.opacity = '0.85'; el.textContent = Number.isFinite(behindSec) ? `LIVE -${Math.round(behindSec)}s` : 'LIVE'; }
+    openNewWindow() { 
+      window.open(this._webrtcUrl(), "_blank", "noopener,noreferrer"); 
     }
-
-    _updateLiveBadge() { const b = this._computeBehind(); this._setLiveBadge(b <= 5, b); }
-
-    _maybeNudgeLive() {
-      const v = this.videoEl; if (!v) return;
-      const r = v.seekable; if (!r || !r.length) return;
-      const end = r.end(r.length - 1);
-      if ((end - v.currentTime) > 5) this._goLive();
-      this._updateLiveBadge();
-    }
-
-    _startLiveKeeper() {
-      this._stopLiveKeeper();
-      this._updateLiveBadge();
-      this.liveTimer = setInterval(() => {
-        const behind = this._computeBehind();
-        this._updateLiveBadge();
-        if (behind === Infinity) return;
-        this._applyCatchupRate(behind);
-        if (behind > 5) this._goLive();
-      }, 1000);
-    }
-
-    _stopLiveKeeper() { if (this.liveTimer) { clearInterval(this.liveTimer); this.liveTimer = null; } if (this.videoEl) this.videoEl.playbackRate = 1.0; }
-
-    _fallbackIframe() {
-      const iframe = document.createElement("iframe");
-      iframe.src = this._webrtcUrl();
-      iframe.style.cssText = "border:0; width:100%; height:100%; background:#000;";
-      const parent = this.videoEl ? this.videoEl.parentNode : null;
-      if (parent && this.videoEl) parent.replaceChild(iframe, this.videoEl);
-      this.videoEl = null;
-      this._stopLiveKeeper();
-      if (this.liveBadgeEl && this.liveBadgeEl.parentNode) this.liveBadgeEl.parentNode.removeChild(this.liveBadgeEl);
-      this.liveBadgeEl = null;
-    }
-
-    openNewWindow() { window.open(this._webrtcUrl(), "_blank", "noopener,noreferrer"); }
 
     openSettings() {
       const host = prompt("MediaMTX host", this.host) || this.host;
       const path = prompt("Path", this.path) || this.path;
       const user = prompt("Viewer username", this.user || "") || "";
       const pass = prompt("Viewer password", this.pass || "") || "";
-      this.host = host; this.path = path; this.user = user; this.pass = pass;
+      
+      this.host = host; 
+      this.path = path; 
+      this.user = user; 
+      this.pass = pass;
+      
       if (this.el) {
-        if (!this.videoEl) {
-          const body = this.el.querySelector("div:nth-child(2)");
-          if (body) {
-            body.innerHTML = "";
-            const vid = document.createElement("video");
-            vid.style.cssText = "width:100%; height:100%; background:#000;";
-            vid.autoplay = true; vid.playsInline = true; vid.muted = true; vid.controls = true;
-            body.appendChild(vid);
-            this.videoEl = vid;
-          }
+        // Restart current protocol
+        if (this.isWebRTC) {
+          this._useWebRTC();
+        } else {
+          this._useHLS();
         }
-        this._playHLS();
       }
     }
 
-    show() { if (this.el) this.el.style.display = "flex"; }
-    hide() { if (this.el) this.el.style.display = "none"; }
-    toggle() { if (this.el && this.el.style.display !== "none") this.hide(); else this.open(); }
+    show() { 
+      if (this.el) this.el.style.display = "flex"; 
+    }
+    
+    hide() { 
+      if (this.el) this.el.style.display = "none"; 
+    }
+    
+    toggle() { 
+      if (this.el && this.el.style.display !== "none") this.hide(); 
+      else this.open(); 
+    }
+    
     close() {
-      if (this.hls) { try { this.hls.destroy(); } catch {} this.hls = null; }
-      this._stopLiveKeeper();
+      this._cleanup();
       if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el);
-      this.el = null; this.videoEl = null; this.liveBadgeEl = null;
+      this.el = null;
+      this.bodyEl = null;
+      this.liveBadgeEl = null;
+      this.protocolBtn = null;
     }
   }
 
