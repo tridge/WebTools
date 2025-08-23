@@ -571,7 +571,7 @@
 
 	// preload saved values (fallbacks preserved)
 	url_input.value = localStorage.getItem(LS_KEYS.url) || "wss://support.ardupilot.org:11099";
-	passphrase_input.value = localStorage.getItem(LS_KEYS.pass) || "";
+	passphrase_input.value = localStorage.getItem(LS_KEYS.pass) || "demo2025";
 
 
 	function applyIds() {

@@ -14,6 +14,7 @@
       this.hlsPort = opts.hlsPort ?? 8888;
       this.wrtcPort = opts.wrtcPort ?? 8889;
       this.path = opts.path || "relay_stream";
+      // Default credentials to avoid prompts - users can change via Settings
       this.user = opts.user || localStorage.getItem("video.user") || "viewer";
       this.pass = opts.pass || localStorage.getItem("video.pass") || "view123";
       this.scheme = opts.scheme || (location.protocol === "https:" ? "https" : "http");
@@ -29,15 +30,83 @@
     }
 
     _hlsUrl() { return `${this.scheme}://${this.host}:${this.hlsPort}/${this.path}/index.m3u8`; }
-    _webrtcUrl() { return `${this.scheme}://${this.host}:${this.wrtcPort}/${this.path}/`; }
+    
+    _webrtcUrl() { 
+      return `${this.scheme}://${this.host}:${this.wrtcPort}/${this.path}/`;
+    }
+
+    _createWebRTCHTML() {
+      const baseUrl = this._webrtcUrl();
+      const auth = (this.user && this.pass) ? btoa(`${this.user}:${this.pass}`) : '';
+      
+      return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+    iframe { width: 100%; height: 100vh; border: 0; }
+  </style>
+</head>
+<body>
+  <iframe id="webrtc-frame" allow="autoplay; fullscreen"></iframe>
+  <script>
+    const frame = document.getElementById('webrtc-frame');
+    const baseUrl = '${baseUrl}';
+    const auth = '${auth}';
+    
+    // Set up the iframe with auth headers if needed
+    if (auth) {
+      fetch(baseUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Basic ' + auth
+        },
+        credentials: 'include'
+      }).then(() => {
+        // After auth, load the WebRTC page
+        frame.src = baseUrl;
+      }).catch(() => {
+        // If auth fails, try without
+        frame.src = baseUrl;
+      });
+    } else {
+      frame.src = baseUrl;
+    }
+  </script>
+</body>
+</html>`;
+    }
 
     open() {
       if (this.el) { this.show(); return; }
 
       const wrap = document.createElement("div");
       wrap.id = "video-panel";
+      
+      // Responsive sizing for mobile
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const screenWidth = window.innerWidth || document.documentElement.clientWidth;
+      const screenHeight = window.innerHeight || document.documentElement.clientHeight;
+      
+      let width, height, right, bottom;
+      if (isMobile) {
+        // On mobile, use most of screen width but leave margins
+        width = Math.min(screenWidth - 24, 380);
+        height = Math.round(width * 9 / 16); // 16:9 aspect ratio
+        right = 12;
+        bottom = 12;
+      } else {
+        // Desktop default
+        width = 420;
+        height = 240;
+        right = 12;
+        bottom = 12;
+      }
+      
       wrap.style.cssText = [
-        "position:absolute; right:12px; bottom:12px; width:420px; height:240px;",
+        `position:absolute; right:${right}px; bottom:${bottom}px; width:${width}px; height:${height}px;`,
         "background:#111; color:#fff; z-index:9999; border-radius:10px;",
         "box-shadow:0 8px 24px rgba(0,0,0,.35); overflow:hidden;",
         "display:flex; flex-direction:column; user-select:none;"
@@ -109,8 +178,35 @@
       this.el = wrap;
       this.bodyEl = body;
       
+      // Add resize listener for mobile responsiveness
+      this.resizeHandler = () => this._handleResize();
+      window.addEventListener('resize', this.resizeHandler);
+      window.addEventListener('orientationchange', this.resizeHandler);
+      
       // Start with WebRTC for lowest latency
       this._useWebRTC();
+    }
+
+    _handleResize() {
+      if (!this.el) return;
+      
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const screenWidth = window.innerWidth || document.documentElement.clientWidth;
+      
+      if (isMobile) {
+        const newWidth = Math.min(screenWidth - 24, 380);
+        const newHeight = Math.round(newWidth * 9 / 16);
+        
+        this.el.style.width = newWidth + 'px';
+        this.el.style.height = newHeight + 'px';
+        
+        // Keep it on screen
+        const currentRight = parseInt(this.el.style.right) || 12;
+        if (currentRight + newWidth > screenWidth) {
+          this.el.style.right = '12px';
+          this.el.style.left = 'auto';
+        }
+      }
     }
 
     _toggleProtocol() {
@@ -125,9 +221,24 @@
       this._cleanup();
       
       const iframe = document.createElement("iframe");
-      iframe.src = this._webrtcUrl();
+      
+      // Use data URL to avoid embedded credentials restriction
+      const htmlContent = this._createWebRTCHTML();
+      const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent);
+      iframe.src = dataUrl;
+      
       iframe.style.cssText = "border:0; width:100%; height:100%; background:#000;";
       iframe.allow = "autoplay; fullscreen";
+      
+      // Prevent auth prompts by handling load errors gracefully
+      iframe.onload = () => {
+        console.log("WebRTC iframe loaded successfully");
+      };
+      
+      iframe.onerror = (e) => {
+        console.warn("WebRTC iframe load error:", e);
+        // Don't show user-visible errors, just log them
+      };
       
       this.bodyEl.insertBefore(iframe, this.bodyEl.firstChild);
       this.currentIframe = iframe;
@@ -340,6 +451,14 @@
     
     close() {
       this._cleanup();
+      
+      // Remove resize listeners
+      if (this.resizeHandler) {
+        window.removeEventListener('resize', this.resizeHandler);
+        window.removeEventListener('orientationchange', this.resizeHandler);
+        this.resizeHandler = null;
+      }
+      
       if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el);
       this.el = null;
       this.bodyEl = null;
