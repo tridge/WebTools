@@ -56,6 +56,7 @@
     let reconnectAttempts = 0;
     let intentionalDisconnect = false;
     let lastConnectionUrl = null;
+    let doneConnect = false;
 
     // dictionary of all received messages
     let messages = {};
@@ -840,25 +841,38 @@
 	    disconnect(true); // Explicitly mark as intentional
 	};
 
-	// --- Auto-connect on first load to cached or default URL/passphrase ---
-	(function tryAutoConnectOnce() {
-	    const SEEN_FLAG = 'gcs.autoconnect.done';
-	    const noAuto = /(?:^|\?|&)noautoconnect=1(?:$|&)/.test(window.location.search);
-	    if (noAuto) return;
+	// --- Auto-connect on first load (retry up to 5x, 1s gap) ---
+	(function autoConnectWithRetry() {
+	    if (doneConnect) return;
 
-	    // Only auto-connect the very first time this app is opened in this browser
-	    if (!localStorage.getItem(SEEN_FLAG)) {
-		// Persist whatever the dialog preloaded (cached or defaults)
-		localStorage.setItem(LS_KEYS.url, (url_input.value || '').trim());
-		const pass = (passphrase_input.value || '').trim();
-		if (pass.length) localStorage.setItem(LS_KEYS.pass, pass);
+	    // Persist the preloaded (cached/default) values
+	    localStorage.setItem(LS_KEYS.url, (url_input.value || '').trim());
+	    const pass = (passphrase_input.value || '').trim();
+	    if (pass.length) localStorage.setItem(LS_KEYS.pass, pass);
 
-		// Go!
-		connect(url_input.value);
+	    const url = url_input.value;
 
-		// Mark as done so we don't auto-connect on every subsequent load
-		localStorage.setItem(SEEN_FLAG, '1');
-	    }
+	    let tries = 0;
+	    const maxTries = 5;
+
+	    const tick = () => {
+		// If we're already open, mark success and stop
+		if (ws && ws.readyState === WebSocket.OPEN) {
+		    doneConnect = true;
+		    return;
+		}
+		// If we're connecting, just check again shortly
+		if (ws && ws.readyState === WebSocket.CONNECTING) {
+		    return void setTimeout(tick, 1000);
+		}
+		// Otherwise, attempt a connect (up to maxTries)
+		if (++tries > maxTries) return;
+		console.log("Trying connect");
+		connect(url);
+		setTimeout(tick, 1000);
+	    };
+
+	    tick();
 	})();
     })();
 
