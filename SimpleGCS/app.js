@@ -642,8 +642,8 @@
 	};
 
 	// preload saved values (fallbacks preserved)
-	url_input.value = localStorage.getItem(LS_KEYS.url) || "wss://support.ardupilot.org:11099";
-	passphrase_input.value = localStorage.getItem(LS_KEYS.pass) || "demo2025";
+	url_input.value = localStorage.getItem(LS_KEYS.url) || "wss://anusc.tridgell.net:20001";
+	passphrase_input.value = localStorage.getItem(LS_KEYS.pass) || "";
 
 
 	function applyIds() {
