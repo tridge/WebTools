@@ -4,14 +4,11 @@
   Depends on:
   - Leaflet (L)
   - MAVLink JS globals: mavlink20
-  - Classes provided by your codebase: MAVFTP, FenceParser
 
   API (attached to window.Fence):
   Fence.init({ map, MAVLink, toast, sendCommandInt })
-  Fence.onConnected(ws, sysId?, compId?)
+  Fence.onConnected(ws)
   Fence.onDisconnected()
-  Fence.setTargets(sysId, compId)
-  Fence.handleMessage(msg)                  // pass FILE_TRANSFER_PROTOCOL messages
   Fence.fetch(silent=false)                 // fetch @MISSION/fence.dat now
   Fence.enable() / Fence.disable()
   Fence.clear()                             // remove fence layers
@@ -23,36 +20,35 @@
         toast: (m)=>console.log(m),
         sendCommandInt: null,
         ws: null,
-        ftp: null,
         parser: null,
         fenceLayers: [],
         fetched: false,
         retryTimer: null,
-        targetSys: 1,
-        targetComp: 1,
         enabled: true,
     };
+
+    const FETCH_TAG = 'fence'; // used for de-duping queued FTP jobs
 
     function log(...a){ try{ console.log('[Fence]', ...a); } catch{} }
     function toast(msg){ try{ State.toast && State.toast(msg); } catch{} }
 
     // Map a fence type → style, taking enabled/disabled into account
     function styleFor(type, enabled = State.enabled) {
-	const COLORS = {
-	    inc: '#4caf50',
-	    exc: '#f44336'
-	};
-	const isInc = (type === mavlink20.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION) ||
+        const COLORS = {
+            inc: '#4caf50',
+            exc: '#f44336'
+        };
+        const isInc = (type === mavlink20.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION) ||
               (type === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION);
-	const color = isInc ? COLORS.inc : COLORS.exc;
-	return {
+        const color = isInc ? COLORS.inc : COLORS.exc;
+        return {
             color,
             fillColor: color,
             fillOpacity: 0,
             weight: enabled ? 2 : 2,
             opacity: enabled ? 1 : 0.9,
             dashArray: enabled ? null : "6,6"   // dashed when disabled
-	};
+        };
     }
 
     function restyleAllFences(){
@@ -105,7 +101,7 @@
         fetchFence(true);
         // then retry until fetched
         State.retryTimer = setInterval(() => {
-            if (!State.fetched && State.ftp) {
+            if (!State.fetched && State.ws) {
                 log('Retrying fence fetch…');
                 fetchFence(true);
             } else if (State.fetched) {
@@ -115,15 +111,16 @@
     }
 
     function fetchFence(silent=false){
-        if (!State.ftp) {
+        if (!State.ws) {
             if (!silent) toast('Not connected');
             return;
         }
         if (!silent) toast('Fetching fence…');
-        State.ftp.getFile('@MISSION/fence.dat', (data) => {
+        // Use FTPManager with de-dupe + 5s watchdog. This prevents stacking retries.
+        FTPManager.getFile('@MISSION/fence.dat', (data) => {
             if (!data) { if (!silent) toast('Failed to fetch fence'); return; }
             try {
-                const fences = State.parser.parse(data);
+		const fences = State.parser.parseFence(data);
                 if (fences) {
                     displayFences(fences);
                     log(`Loaded ${fences.length} fence items`);
@@ -137,7 +134,7 @@
                 console.warn('Fence parse error', e);
                 if (!silent) toast('Fence parse error');
             }
-        });
+        }, { tag: FETCH_TAG, dropQueuedTag: true, dropQueuedPath: true, timeoutMs: 5000 });
     }
 
     const API = {
@@ -145,30 +142,16 @@
             State.map = map; State.MAVLink = MAVLink;
             if (toast) State.toast = toast;
             State.sendCommandInt = sendCommandInt;
-            State.parser = new FenceParser();
+	    State.parser = new MissionParser();
             return API;
         },
-        onConnected(ws, sysId=State.targetSys, compId=State.targetComp){
+        onConnected(ws){
             State.ws = ws;
-            State.ftp = new MAVFTP(State.MAVLink, ws);
-            State.targetSys = sysId; State.targetComp = compId;
-            State.ftp.targetSystem = sysId;
-            State.ftp.targetComponent = compId;
-            log('FTP initialized for', sysId, compId);
             startRetry();
         },
         onDisconnected(){
             stopRetry();
-            State.ws = null; State.ftp = null;
-        },
-        setTargets(sysId, compId){
-            State.targetSys = sysId; State.targetComp = compId;
-            if (State.ftp) { State.ftp.targetSystem = sysId; State.ftp.targetComponent = compId; }
-        },
-        handleMessage(m){
-            if (State.ftp && m && m._name === 'FILE_TRANSFER_PROTOCOL') {
-                try { State.ftp.handleMessage(m); } catch (e) { console.warn('FTP handle error', e); }
-            }
+            State.ws = null;
         },
         fetch: (silent=false) => fetchFence(silent),
         clear(){ displayFences([]); },

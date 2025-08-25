@@ -26,8 +26,9 @@
     // optional grid overlay
     MetricGrid.init(map); // optional opts: { color: 'rgba(255,235,59,.6)', targetPx: 150, lineWidth: 1 }
 
-    // setup fence code
-    Fence.init({ map, MAVLink, toast, sendCommandInt });
+    // setup fence and mission code
+    //Fence.init({ map, MAVLink, toast, sendCommandInt });
+    Mission.init({ map, MAVLink, toast, sendCommandInt });
 
     // prevent iPhone popup menus
     map.getContainer().addEventListener("contextmenu", (e) => e.preventDefault());
@@ -405,6 +406,7 @@
             { text: "Messages", action: () => { StatusLog.open(menuBtn); menuTip.hide(); } },
 	    { text: "My Location", action: () => { UserLocation.toggle(); menuTip.hide(); } },
 	    { text: "Fetch Fence", action: () => { Fence.fetch(); menuTip.hide(); }},
+	    { text: "Fetch Mission", action: () => { Mission.fetch(); menuTip.hide(); }},
 	    { text: "Fence Disable", action: () => { Fence.disable(); menuTip.hide(); }},
 	    { text: "Fence Enable", action: () => { Fence.enable(); menuTip.hide(); }},
             { text: "Reboot", action: () => { sendReboot(); menuTip.hide(); }},
@@ -723,7 +725,9 @@
 
 		toast("Connected");
 		startHeartbeatLoop();
-		Fence.onConnected(ws, vehSysId, vehCompId);
+		FTPManager.setLink(MAVLink, ws, vehSysId, vehCompId);
+		//Fence.onConnected(ws);
+		Mission.onConnected(ws);
 	    };
 
 	    ws.onerror = (error) => {
@@ -738,7 +742,9 @@
 		    clearInterval(hbInterval);
 		    hbInterval = null;
 		}
-		Fence.onDisconnected();
+		//Fence.onDisconnected();
+		Mission.onDisconnected();
+		FTPManager.clearLink();
 
 		// Only attempt reconnect if it wasn't an intentional disconnect
 		if (!intentionalDisconnect) {
@@ -777,7 +783,7 @@
 			// Learn target addresses
 			vehSysId = m.sysid;
 			vehCompId = m.compid;
-			Fence.setTargets(vehSysId, vehCompId);
+			FTPManager.setTargets(vehSysId, vehCompId);
 
 			VehicleType.mavType = m.type;
 			VehicleType.cls = classifyVehicle(m.type);
@@ -812,7 +818,7 @@
 
 		    // Handle FTP messages
 		    if (m._name === "FILE_TRANSFER_PROTOCOL") {
-			Fence.handleMessage(m);
+			FTPManager.handleMessage(m);
 		    }
 
 		    // BATTERY_STATUS => battery percentage
