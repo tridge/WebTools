@@ -1,4 +1,4 @@
-// MAVLink FTP implementation for fetching fence data
+// MAVLink FTP implementation for fetching data
 // Based on MAVProxy's mavproxy_ftp.py
 
 class MAVFTP {
@@ -310,8 +310,8 @@ class MAVFTP {
     }
 }
 
-// Fence data parser
-class FenceParser {
+// Mission data parser
+class MissionParser {
     constructor() {
     }
 
@@ -332,7 +332,7 @@ class FenceParser {
 
 	var items = [];
 
-	// Read each fence item
+	// Read each item
 	for (let i = 0; i < count; i++) {
 
 	    const item_len = 38;
@@ -361,8 +361,9 @@ class FenceParser {
 	}
 	return items;
     }
-    
-    parse(data) {
+
+    // parse as a set of fences
+    parseFence(data) {
 	try {
 	    var items = this.parseMissionItems(data);
 	    var fences = [];
@@ -399,8 +400,18 @@ class FenceParser {
 	    return null;
 	}
     }
+
+    // parse as a mission
+    parseMission(data) {
+	try {
+	    return this.parseMissionItems(data);
+	} catch (e) {
+	    console.error("Error parsing mission data:", e);
+	    return null;
+	}
+    }
 }
 
 // Export for use in main app
 window.MAVFTP = MAVFTP;
-window.FenceParser = FenceParser;
+window.MissionParser = MissionParser;
