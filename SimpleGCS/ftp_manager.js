@@ -102,16 +102,6 @@
       State.ws = null;
       State.ftp = null;
     },
-    setTargets(sysId, compId) {
-      if (typeof sysId === 'number') State.targetSys = sysId;
-      if (typeof compId === 'number') State.targetComp = compId;
-      if (State.ftp) {
-        try {
-          State.ftp.targetSystem = State.targetSys;
-          State.ftp.targetComponent = State.targetComp;
-        } catch {}
-      }
-    },
     handleMessage(m) {
       // Deliver FTP payloads to MAVFTP instance if present
       if (!State.ftp || !m) return;

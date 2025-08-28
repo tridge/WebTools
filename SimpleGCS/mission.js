@@ -132,7 +132,7 @@
     },
     onConnected(ws) {
       State.ws = ws;
-      startRetry();
+      //startRetry();
     },
     onDisconnected(){
       stopRetry();

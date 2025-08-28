@@ -8,7 +8,7 @@
     // IDs we send as (GCS identity)
     let gcsSystemId = 255, gcsComponentId = 190;
     // Target vehicle (auto-discovered from incoming msgs)
-    let vehSysId = 1, vehCompId = 1;
+    let vehSysId = -1, vehCompId = -1;
 
     // Vehicle type cache (for icon)
     const VehicleType = { mavType: null, cls: "plane", lastSeen: 0 };
@@ -27,7 +27,7 @@
     MetricGrid.init(map); // optional opts: { color: 'rgba(255,235,59,.6)', targetPx: 150, lineWidth: 1 }
 
     // setup fence and mission code
-    //Fence.init({ map, MAVLink, toast, sendCommandInt });
+    Fence.init({ map, MAVLink, toast, sendCommandInt });
     Mission.init({ map, MAVLink, toast, sendCommandInt });
 
     // prevent iPhone popup menus
@@ -723,11 +723,8 @@
 		    reconnectTimer = null;
 		}
 
-		toast("Connected");
 		startHeartbeatLoop();
-		FTPManager.setLink(MAVLink, ws, vehSysId, vehCompId);
-		//Fence.onConnected(ws);
-		Mission.onConnected(ws);
+		toast("Connected");
 	    };
 
 	    ws.onerror = (error) => {
@@ -742,7 +739,7 @@
 		    clearInterval(hbInterval);
 		    hbInterval = null;
 		}
-		//Fence.onDisconnected();
+		Fence.onDisconnected();
 		Mission.onDisconnected();
 		FTPManager.clearLink();
 
@@ -781,9 +778,13 @@
 		    if (m._name === "HEARTBEAT" && m.autopilot == mavlink20.MAV_AUTOPILOT_ARDUPILOTMEGA) {
 
 			// Learn target addresses
-			vehSysId = m.sysid;
-			vehCompId = m.compid;
-			FTPManager.setTargets(vehSysId, vehCompId);
+			if (m.sysid != vehSysId) {
+			    vehSysId = m.sysid;
+			    vehCompId = m.compid;
+			    FTPManager.setLink(MAVLink, ws, vehSysId, vehCompId);
+			    Fence.onConnected(ws);
+			    Mission.onConnected(ws);
+			}
 
 			VehicleType.mavType = m.type;
 			VehicleType.cls = classifyVehicle(m.type);
