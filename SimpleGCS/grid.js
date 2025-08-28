@@ -160,7 +160,8 @@
 		State.canvas = null; State.ctx = null;
 	    }
 	},
-	toggle() { State.enabled ? API.off() : API.on(); }
+	toggle() { State.enabled ? API.off() : API.on(); },
+	get enabled() { return State.enabled; } // Expose state for settings dialog
     };
 
     window.MetricGrid = API;

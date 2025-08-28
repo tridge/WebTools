@@ -383,12 +383,10 @@
         `;
 
         const menuItems = [
-            { text: "Toggle Grid", action: () => { MetricGrid.toggle(); menuTip.hide(); } },
             { text: "Video (Inset)", action: () => { window.VideoPanel?.toggle(); menuTip.hide(); }},
             { text: "Video (New Window)", action: () => { window.VideoPanel?.openNewWindow(); menuTip.hide(); }},
             { text: "Messages", action: () => { StatusLog.open(menuBtn); menuTip.hide(); } },
             { text: "Settings", action: () => { openSettingsTip(menuBtn); menuTip.hide(); } },
-            { text: "My Location", action: () => { UserLocation.toggle(); menuTip.hide(); } },
             { text: "Fetch Fence", action: () => { Fence.fetch(); menuTip.hide(); }},
             { text: "Fetch Mission", action: () => { Mission.fetch(); menuTip.hide(); }},
             { text: "Fence Disable", action: () => { Fence.disable(); menuTip.hide(); }},
@@ -433,10 +431,11 @@
     // Settings dialog
     function openSettingsTip(anchorEl) {
         const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex; flex-direction:column; gap:8px; min-width:280px;";
+        wrap.style.cssText = "display:flex; flex-direction:column; gap:12px; min-width:280px;";
 
-        const row1 = document.createElement("div");
-        row1.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:4px;">Map tiles</label>`;
+        // Map tiles section
+        const tilesSection = document.createElement("div");
+        tilesSection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:4px;">Map Tiles</label>`;
         const select = document.createElement("select");
         select.style.cssText = "width:100%; padding:6px;";
 
@@ -459,41 +458,77 @@
             if (AppSettings.tiles === val) opt.selected = true;
             select.appendChild(opt);
         });
-        row1.appendChild(select);
 
-        const row2 = document.createElement("div");
-        row2.style.cssText = "display:flex; flex-direction:column; gap:6px;";
+        // Apply tile changes immediately
+        select.onchange = () => {
+            AppSettings.tiles = select.value;
+            MapManager.applyTileProvider();
+        };
+
+        tilesSection.appendChild(select);
+
+        // Display options section
+        const displaySection = document.createElement("div");
+        displaySection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:6px;">Display Options</label>`;
         
-        const mkChk = (id, label, init) => {
+        const mkChk = (id, label, init, onChange) => {
             const d = document.createElement("label");
-            d.style.cssText = "display:flex; align-items:center; gap:8px;";
+            d.style.cssText = "display:flex; align-items:center; gap:8px; margin-bottom:4px;";
             const c = document.createElement("input");
             c.type = "checkbox"; 
             c.checked = init; 
             c.id = id;
+            c.onchange = onChange;
             const s = document.createElement("span"); 
             s.textContent = label;
             d.append(c, s);
             return { wrap: d, chk: c };
         };
         
-        const fence = mkChk("auto-fence", "Fetch fence on first heartbeat", AppSettings.autoFetchFence);
-        const mission = mkChk("auto-mission", "Fetch mission on first heartbeat", AppSettings.autoFetchMission);
-        row2.append(fence.wrap, mission.wrap);
+        const showGrid = mkChk("show-grid", "Show Grid", MetricGrid.enabled || false, (e) => {
+            if (e.target.checked) {
+                MetricGrid.on();
+            } else {
+                MetricGrid.off();
+            }
+        });
 
-        const saveBtn = document.createElement("button");
-        saveBtn.className = "btn small";
-        saveBtn.textContent = "Save";
-        saveBtn.onclick = () => {
-            AppSettings.tiles = select.value;
-            AppSettings.autoFetchFence = fence.chk.checked;
-            AppSettings.autoFetchMission = mission.chk.checked;
-            MapManager.applyTileProvider();
+        const showLocation = mkChk("show-location", "Show My Location", UserLocation.active(), (e) => {
+            if (e.target.checked) {
+                UserLocation.start();
+            } else {
+                UserLocation.stop();
+            }
+        });
+
+        displaySection.appendChild(showGrid.wrap);
+        displaySection.appendChild(showLocation.wrap);
+
+        // Auto-fetch section
+        const autoSection = document.createElement("div");
+        autoSection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:6px;">Auto-fetch on Connect</label>`;
+        
+        const fence = mkChk("auto-fence", "Fetch fence on first heartbeat", AppSettings.autoFetchFence, (e) => {
+            AppSettings.autoFetchFence = e.target.checked;
+        });
+        
+        const mission = mkChk("auto-mission", "Fetch mission on first heartbeat", AppSettings.autoFetchMission, (e) => {
+            AppSettings.autoFetchMission = e.target.checked;
+        });
+
+        autoSection.appendChild(fence.wrap);
+        autoSection.appendChild(mission.wrap);
+
+        // Close button
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "btn small";
+        closeBtn.textContent = "Close";
+        closeBtn.style.cssText = "align-self: flex-end; margin-top: 8px;";
+        closeBtn.onclick = () => {
             tip.hide();
-            window.GCSUtils.toast("Settings saved");
         };
 
-        wrap.append(row1, row2, saveBtn);
+        wrap.append(tilesSection, displaySection, autoSection, closeBtn);
 
         const tip = tippy(anchorEl, {
             content: wrap, 
