@@ -120,7 +120,7 @@
         FTPManager.getFile('@MISSION/fence.dat', (data) => {
             if (!data) { if (!silent) toast('Failed to fetch fence'); return; }
             try {
-		const fences = State.parser.parseFence(data);
+		        const fences = State.parser.parseFence(data);
                 if (fences) {
                     displayFences(fences);
                     log(`Loaded ${fences.length} fence items`);
@@ -142,7 +142,7 @@
             State.map = map; State.MAVLink = MAVLink;
             if (toast) State.toast = toast;
             State.sendCommandInt = sendCommandInt;
-	    State.parser = new MissionParser();
+	        State.parser = new MissionParser();
             return API;
         },
         onConnected(ws){

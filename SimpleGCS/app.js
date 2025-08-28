@@ -42,31 +42,31 @@
             autoFence: "gcs.auto.fetchFence",
             autoMission: "gcs.auto.fetchMission"
         };
-        
-        function get(key, def) { 
-            const v = localStorage.getItem(key); 
-            if (v == null) return def; 
-            return v; 
+
+        function get(key, def) {
+            const v = localStorage.getItem(key);
+            if (v == null) return def;
+            return v;
         }
-        
-        function getBool(key, def = false) { 
-            const v = localStorage.getItem(key); 
-            if (v == null) return def; 
-            return v === "1" || v === "true"; 
+
+        function getBool(key, def = false) {
+            const v = localStorage.getItem(key);
+            if (v == null) return def;
+            return v === "1" || v === "true";
         }
-        
+
         const state = {
             tiles: get(LS.tiles, "osm"),
             autoFetchFence: getBool(LS.autoFence, true),
             autoFetchMission: getBool(LS.autoMission, false)
         };
-        
+
         function save() {
             localStorage.setItem(LS.tiles, state.tiles);
             localStorage.setItem(LS.autoFence, state.autoFetchFence ? "1" : "0");
             localStorage.setItem(LS.autoMission, state.autoFetchMission ? "1" : "0");
         }
-        
+
         return {
             get tiles() { return state.tiles; },
             set tiles(v) { state.tiles = v; save(); },
@@ -96,11 +96,11 @@
 
     // --- Command helpers ---
     function sendCommandInt(cmd, params = []) {
-        if (!ws) { 
-            window.GCSUtils.toast("Not connected"); 
-            return; 
+        if (!ws) {
+            window.GCSUtils.toast("Not connected");
+            return;
         }
-        
+
         const payload = new mavlink20.messages.command_int(
             vehSysId,
             vehCompId,
@@ -110,18 +110,18 @@
             params[0] || 0, params[1] || 0, params[2] || 0, params[3] || 0,
             params[4] || 0, params[5] || 0, params[6] || 0
         );
-        
+
         const pkt = payload.pack(MAVLink);
         ws.send(Uint8Array.from(pkt));
     }
 
     function sendSetMode(mode) {
-        if (!ws) { 
-            window.GCSUtils.toast("Not connected"); 
-            return; 
+        if (!ws) {
+            window.GCSUtils.toast("Not connected");
+            return;
         }
         sendCommandInt(mavlink20.MAV_CMD_DO_SET_MODE, [
-            mavlink20.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, 
+            mavlink20.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
             mode
         ]);
     }
@@ -470,21 +470,21 @@
         // Display options section
         const displaySection = document.createElement("div");
         displaySection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:6px;">Display Options</label>`;
-        
+
         const mkChk = (id, label, init, onChange) => {
             const d = document.createElement("label");
             d.style.cssText = "display:flex; align-items:center; gap:8px; margin-bottom:4px;";
             const c = document.createElement("input");
-            c.type = "checkbox"; 
-            c.checked = init; 
+            c.type = "checkbox";
+            c.checked = init;
             c.id = id;
             c.onchange = onChange;
-            const s = document.createElement("span"); 
+            const s = document.createElement("span");
             s.textContent = label;
             d.append(c, s);
             return { wrap: d, chk: c };
         };
-        
+
         const showGrid = mkChk("show-grid", "Show Grid", MetricGrid.enabled || false, (e) => {
             if (e.target.checked) {
                 MetricGrid.on();
@@ -507,11 +507,11 @@
         // Auto-fetch section
         const autoSection = document.createElement("div");
         autoSection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:6px;">Auto-fetch on Connect</label>`;
-        
+
         const fence = mkChk("auto-fence", "Fetch fence on first heartbeat", AppSettings.autoFetchFence, (e) => {
             AppSettings.autoFetchFence = e.target.checked;
         });
-        
+
         const mission = mkChk("auto-mission", "Fetch mission on first heartbeat", AppSettings.autoFetchMission, (e) => {
             AppSettings.autoFetchMission = e.target.checked;
         });
@@ -531,11 +531,11 @@
         wrap.append(tilesSection, displaySection, autoSection, closeBtn);
 
         const tip = tippy(anchorEl, {
-            content: wrap, 
-            interactive: true, 
-            trigger: "manual", 
+            content: wrap,
+            interactive: true,
+            trigger: "manual",
             theme: "light-border",
-            appendTo: () => document.body, 
+            appendTo: () => document.body,
             placement: "right-start"
         });
         tip.show();
@@ -547,17 +547,17 @@
         const tipDiv = document.createElement("div");
         tipDiv.appendChild(document.importNode(
             document.getElementById("connection_tip_template").content, true)
-        );
-        
+                          );
+
         const tip = tippy(button, {
-            content: tipDiv, 
-            interactive: true, 
-            trigger: "click", 
+            content: tipDiv,
+            interactive: true,
+            trigger: "click",
             theme: "light-border",
-            appendTo: () => document.body, 
+            appendTo: () => document.body,
             placement: "right-start"
         });
-        
+
         tipDiv.querySelector("#Close").onclick = () => tip.hide();
 
         const urlInput = tipDiv.querySelector("#target_url");
@@ -588,7 +588,7 @@
             let cid = parseInt(compInput.value || "190", 10);
             sid = (sid >= 1 && sid <= 255) ? sid : 255;
             cid = (cid >= 0 && cid <= 255) ? cid : 190;
-            gcsSystemId = sid; 
+            gcsSystemId = sid;
             gcsComponentId = cid;
             MAVLink.srcSystem = sid;
             MAVLink.srcComponent = cid;
@@ -602,12 +602,12 @@
         }
 
         function startHeartbeatLoop() {
-            if (hbInterval) { 
-                clearInterval(hbInterval); 
-                hbInterval = null; 
+            if (hbInterval) {
+                clearInterval(hbInterval);
+                hbInterval = null;
             }
             if (!hbCheckbox.checked) return;
-            
+
             hbInterval = setInterval(() => {
                 try {
                     if (!setupSigning) {
@@ -620,15 +620,15 @@
                             MAVLink.signing.sign_outgoing = true;
                         }
                     }
-                    
+
                     const msg = new mavlink20.messages.heartbeat(6, 8, 0, 0, 4);
                     const pkt = msg.pack(MAVLink);
                     ws?.send(Uint8Array.from(pkt));
                 } catch (e) {
                     console.error("Heartbeat send failed:", e?.message || e);
-                    if (hbInterval) { 
-                        clearInterval(hbInterval); 
-                        hbInterval = null; 
+                    if (hbInterval) {
+                        clearInterval(hbInterval);
+                        hbInterval = null;
                     }
                     setConnState("error");
                     window.GCSUtils.toast("Heartbeat stopped after error");
@@ -672,7 +672,7 @@
                     clearInterval(hbInterval);
                     hbInterval = null;
                 }
-                
+
                 Fence.onDisconnected();
                 Mission.onDisconnected();
                 FTPManager.clearLink();
@@ -790,7 +790,7 @@
     function handleMessage(evt) {
         const buf = new Uint8Array(evt.data);
         MAVLink.pushBuffer(buf);
-        
+
         while (true) {
             const m = MAVLink.parseChar(null);
             if (m === null) break;
@@ -822,10 +822,10 @@
                 FTPManager.setLink(MAVLink, ws, vehSysId, vehCompId);
                 Fence.onConnected(ws);
                 Mission.onConnected(ws);
-                
+
                 if (AppSettings.autoFetchMission) {
-                    try { 
-                        setTimeout(() => Mission.fetch(true), 10); 
+                    try {
+                        setTimeout(() => Mission.fetch(true), 10);
                     } catch {}
                 }
             }
@@ -835,11 +835,11 @@
             VehicleType.lastSeen = Date.now();
 
             telemetry.armed = !!(m.base_mode & mavlink20.MAV_MODE_FLAG_SAFETY_ARMED);
-            
+
             const isRoverish = (VehicleType.mavType === mavlink20.MAV_TYPE_GROUND_ROVER) ||
-                              (VehicleType.mavType === mavlink20.MAV_TYPE_SURFACE_BOAT);
-            telemetry.modeName = isRoverish ? 
-                (window.GCSUtils.roverModeNames[m.custom_mode] || `${m.custom_mode}`) : 
+                  (VehicleType.mavType === mavlink20.MAV_TYPE_SURFACE_BOAT);
+            telemetry.modeName = isRoverish ?
+                (window.GCSUtils.roverModeNames[m.custom_mode] || `${m.custom_mode}`) :
                 `${m.custom_mode}`;
 
             updateTelemetryDisplay();
