@@ -147,7 +147,7 @@
         },
         onConnected(ws){
             State.ws = ws;
-            startRetry();
+            if (window.AppSettings ? AppSettings.autoFetchFence : true) startRetry();
         },
         onDisconnected(){
             stopRetry();

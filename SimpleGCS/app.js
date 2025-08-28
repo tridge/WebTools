@@ -15,7 +15,117 @@
 
     // Map + marker
     const map = L.map(document.getElementById("map"), { zoomControl: true }).setView([0,0], 2);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+
+    // --- AppSettings (persisted) ---
+    const AppSettings = (() => {
+	const LS = {
+            tiles: "gcs.tiles.provider",
+            autoFence: "gcs.auto.fetchFence",
+            autoMission: "gcs.auto.fetchMission"
+	};
+	function get(key, def) { const v = localStorage.getItem(key); if (v == null) return def; return v; }
+	function getBool(key, def=false) { const v = localStorage.getItem(key); if (v == null) return def; return v === "1" || v === "true"; }
+	const state = {
+            tiles: get(LS.tiles, "osm"),              // 'osm' | 'google' | 'google-terrain'
+            autoFetchFence: getBool(LS.autoFence, true),   // default true
+            autoFetchMission: getBool(LS.autoMission, false)
+	};
+	function save() {
+            localStorage.setItem(LS.tiles, state.tiles);
+            localStorage.setItem(LS.autoFence, state.autoFetchFence ? "1" : "0");
+            localStorage.setItem(LS.autoMission, state.autoFetchMission ? "1" : "0");
+	}
+	return {
+            get tiles(){ return state.tiles; },
+            set tiles(v){ state.tiles = v; save(); },
+            get autoFetchFence(){ return state.autoFetchFence; },
+            set autoFetchFence(v){ state.autoFetchFence = !!v; save(); },
+            get autoFetchMission(){ return state.autoFetchMission; },
+            set autoFetchMission(v){ state.autoFetchMission = !!v; save(); },
+            save, state
+	};
+    })();
+    window.AppSettings = AppSettings; // expose for other modules
+
+
+    
+    // Dynamic base layer selection
+    let _baseLayer = null;
+    function _removeBase() { if (_baseLayer) { try { map.removeLayer(_baseLayer); } catch{} _baseLayer = null; } }
+
+    function _makeGoogleLayer(kind) {
+	// Requires leaflet.gridlayer.googleMutant to be available at runtime.
+	// If not present, we'll fall back to OSM and toast a hint.
+	if (L.gridLayer && L.gridLayer.googleMutant) {
+            return L.gridLayer.googleMutant({ type: kind }); // 'roadmap' | 'terrain'
+	}
+	toast("Google tile layer unavailable (missing GoogleMutant). Falling back to OSM");
+	return null;
+    }
+
+
+    function applyTileProvider() {
+	_removeBase();
+	const provider = AppSettings.tiles;
+
+	// Provider registry
+	
+	const XYZ = {
+            "osm": {
+		url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+		opts: { maxZoom: 19, attribution: "© OpenStreetMap" }
+            },
+            "opentopomap": {
+		url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+		opts: { maxZoom: 17, attribution: "© OpenTopoMap (CC-BY-SA)" }
+            },
+            "carto-light": {
+		url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+		opts: { maxZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap © CARTO" }
+            },
+            "carto-dark": {
+		url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+		opts: { maxZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap © CARTO" }
+            },
+            "esri-world-imagery": {
+		url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+		opts: { maxZoom: 20, attribution: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community" }
+            },
+            "au-ga-topo": {
+		url: "https://services.ga.gov.au/gis/rest/services/NationalBaseMap/MapServer/tile/{z}/{y}/{x}",
+		opts: { maxZoom: 20, attribution: "© Geoscience Australia" }
+            },
+            "uk-os-opendata": {
+		url: "https://tiles.arcgis.com/tiles/knu9Ytn4VsWTJ4CG/arcgis/rest/services/OS_Open_Zoomstack_3857/MapServer/tile/{z}/{y}/{x}",
+		opts: { maxZoom: 20, attribution: "© Ordnance Survey OpenData" }
+            }
+	};
+
+	// Google via GoogleMutant (requires Google Maps JS + Mutant plugin)
+	const MUTANT_TYPES = {
+            "google": "roadmap",
+            "google-terrain": "terrain",
+            "google-satellite": "satellite",
+            "google-hybrid": "hybrid"
+	};
+
+	if (MUTANT_TYPES[provider]) {
+            if (L.gridLayer && L.gridLayer.googleMutant) {
+		_baseLayer = L.gridLayer.googleMutant({ type: MUTANT_TYPES[provider] }).addTo(map);
+		return;
+            } else {
+		toast("Google layers need Leaflet.GoogleMutant + Google Maps API; falling back to OSM");
+            }
+	}
+
+	// XYZ fallbacks / non-Google providers
+	const meta = XYZ[provider] || XYZ["osm"];
+	_baseLayer = L.tileLayer(meta.url, meta.opts).addTo(map);
+    }
+
+    applyTileProvider();
+
+
 
     // add a scale bar
     L.control.scale({ position: 'bottomright', imperial: false, maxWidth: 300 }).addTo(map);
@@ -404,6 +514,7 @@
 	    { text: "Video (Inset)", action: () => { window.VideoPanel?.toggle(); menuTip.hide(); }},
 	    { text: "Video (New Window)", action: () => { window.VideoPanel?.openNewWindow(); menuTip.hide(); }},
             { text: "Messages", action: () => { StatusLog.open(menuBtn); menuTip.hide(); } },
+	    { text: "Settings", action: () => { openSettingsTip(menuBtn); menuTip.hide(); } },
 	    { text: "My Location", action: () => { UserLocation.toggle(); menuTip.hide(); } },
 	    { text: "Fetch Fence", action: () => { Fence.fetch(); menuTip.hide(); }},
 	    { text: "Fetch Mission", action: () => { Mission.fetch(); menuTip.hide(); }},
@@ -447,6 +558,78 @@
 	return menuBtn;
     }
 
+    
+    // Settings dialog (Tiles + auto-fetch options)
+    function openSettingsTip(anchorEl) {
+	const wrap = document.createElement("div");
+	wrap.style.cssText = "display:flex; flex-direction:column; gap:8px; min-width:280px;";
+
+	// Tile provider select
+	const row1 = document.createElement("div");
+	row1.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:4px;">Map tiles</label>`;
+	const select = document.createElement("select");
+	select.style.cssText = "width:100%; padding:6px;";
+	
+
+	[
+	    ["osm", "OpenStreetMap (default)"],
+	    ["opentopomap", "OpenTopoMap"],
+	    ["carto-light", "Carto Light"],
+	    ["carto-dark", "Carto Dark"],
+	    ["esri-world-imagery", "Esri World Imagery (Satellite)"],
+	    ["au-ga-topo", "Australia – Geoscience Topographic"],
+	    ["uk-os-opendata", "UK – Ordnance Survey OpenData"],
+	    ["google", "Google Maps (Roadmap)"],
+	    ["google-terrain", "Google Maps (Terrain)"],
+	    ["google-satellite", "Google Maps (Satellite)"],
+	    ["google-hybrid", "Google Maps (Hybrid)"]
+	].forEach(([val, label]) => {
+	    const opt = document.createElement("option"); 
+	    opt.value = val; 
+	    opt.textContent = label;
+	    if (AppSettings.tiles === val) opt.selected = true;
+	    select.appendChild(opt);
+	});
+	row1.appendChild(select);
+
+
+
+	// Checkboxes: auto-fetch fence/mission
+	const row2 = document.createElement("div");
+	row2.style.cssText = "display:flex; flex-direction:column; gap:6px;";
+	const mkChk = (id, label, init) => {
+            const d = document.createElement("label");
+            d.style.cssText = "display:flex; align-items:center; gap:8px;";
+            const c = document.createElement("input");
+            c.type = "checkbox"; c.checked = init; c.id = id;
+            const s = document.createElement("span"); s.textContent = label;
+            d.append(c, s);
+            return {wrap:d, chk:c};
+	};
+	const fence = mkChk("auto-fence", "Fetch fence on first heartbeat", AppSettings.autoFetchFence);
+	const mission = mkChk("auto-mission", "Fetch mission on first heartbeat", AppSettings.autoFetchMission);
+	row2.append(fence.wrap, mission.wrap);
+
+	const saveBtn = document.createElement("button");
+	saveBtn.className = "btn small";
+	saveBtn.textContent = "Save";
+	saveBtn.onclick = () => {
+            AppSettings.tiles = select.value;
+            AppSettings.autoFetchFence = fence.chk.checked;
+            AppSettings.autoFetchMission = mission.chk.checked;
+            applyTileProvider(); // switch immediately
+            tip.hide();
+            toast("Settings saved");
+	};
+
+	wrap.append(row1, row2, saveBtn);
+
+	const tip = tippy(anchorEl, {
+            content: wrap, interactive: true, trigger: "manual", theme: "light-border",
+            appendTo: () => document.body, placement: "right-start"
+	});
+	tip.show();
+    }
     function classifyVehicle(mavType) {
 	if (mavType === mavlink20.MAV_TYPE_SURFACE_BOAT) return "boat";     // MAV_TYPE_SURFACE_BOAT
 	if (mavType === mavlink20.MAV_TYPE_GROUND_ROVER) return "rover";    // MAV_TYPE_GROUND_ROVER
@@ -784,6 +967,7 @@
 			    FTPManager.setLink(MAVLink, ws, vehSysId, vehCompId);
 			    Fence.onConnected(ws);
 			    Mission.onConnected(ws);
+                            if (AppSettings.autoFetchMission) { try { setTimeout(() => Mission.fetch(true), 10); } catch {} }
 			}
 
 			VehicleType.mavType = m.type;
