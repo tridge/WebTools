@@ -67,7 +67,7 @@
     /* Tippy tweaks */
     .tippy-box { max-width: 92vw; }
 
-    /* prevent iOS long‑press callout & text selection on the map */
+    /* prevent iOS longâ€'press callout & text selection on the map */
     #map, .leaflet-container {
         -webkit-touch-callout: none;
         -webkit-user-select: none;
@@ -128,14 +128,21 @@
   <!-- HLS for browsers without native HLS (Chrome/Firefox/Android) -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
-  <!-- modules -->
+  <!-- Utility modules (load first) -->
+  <script src="util.js"></script>
+  
+  <!-- Core modules -->
   <script src="ftp_manager.js"></script>
   <script src="video.js"></script>
   <script src="userloc.js"></script>
   <script src="grid.js"></script>
   <script src="fence.js"></script>
   <script src="mission.js"></script>
+  
+  <!-- Map manager (load before app) -->
+  <script src="map.js"></script>
 
+  <!-- Main application -->
   <script src="app.js"></script>
 </body>
 </html>
