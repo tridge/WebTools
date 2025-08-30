@@ -23,8 +23,8 @@ function classifyVehicle(mavType) {
     if (mavType === mavlink20.MAV_TYPE_SURFACE_BOAT) return "boat";
     if (mavType === mavType === mavlink20.MAV_TYPE_GROUND_ROVER) return "rover";
     if (mavType === mavlink20.MAV_TYPE_FIXED_WING) return "plane";
-    if (mavType === mavlink20.MAV_TYPE_QUADROTOR || 
-        mavType === mavlink20.MAV_TYPE_COAXIAL || 
+    if (mavType === mavlink20.MAV_TYPE_QUADROTOR ||
+        mavType === mavlink20.MAV_TYPE_COAXIAL ||
         mavType === mavlink20.MAV_TYPE_HELICOPTER) return "copter";
     return "plane";
 }
@@ -33,19 +33,19 @@ function classifyVehicle(mavType) {
 const MCCMNC_MAP = {
     // Australia
     50501: "AU Telstra",
-    50502: "AU Optus", 
+    50502: "AU Optus",
     50503: "AU Vodafone",
 
     // United Kingdom (common MNCs)
     23410: "UK O2",
-    23411: "UK O2", 
+    23411: "UK O2",
     23402: "UK O2",
-    23415: "UK Vodafone",
+    23415: "UK Voda",
     23420: "UK Three",
-    23430: "UK EE (T-Mobile)",
-    23433: "UK EE (Orange)",
+    23430: "UK EE(T-M)",
+    23433: "UK EE(O)",
     23431: "UK EE",
-    23432: "UK EE", 
+    23432: "UK EE",
     23434: "UK EE"
 };
 
