@@ -24,6 +24,35 @@
 
     // Messages dictionary
     let messages = {};
+    // Track pending command ACKs (by MAV_CMD id)
+    const PendingAcks = new Set();
+
+    // Human-readable names for common MAV_CMDs we send
+    function mavCmdName(id) {
+        switch (id) {
+            case mavlink20.MAV_CMD_COMPONENT_ARM_DISARM: return "COMPONENT_ARM_DISARM";
+            case mavlink20.MAV_CMD_DO_SET_MODE: return "DO_SET_MODE";
+            case mavlink20.MAV_CMD_DO_REPOSITION: return "DO_REPOSITION";
+            case mavlink20.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN: return "PREFLIGHT_REBOOT_SHUTDOWN";
+            case mavlink20.MAV_CMD_DO_FENCE_ENABLE: return "DO_FENCE_ENABLE";
+            default: return "MAV_CMD " + id;
+        }
+    }
+
+    // Human-readable names for MAV_RESULT
+    function mavResultName(code) {
+        switch (code) {
+            case mavlink20.MAV_RESULT_ACCEPTED: return "ACCEPTED";
+            case mavlink20.MAV_RESULT_TEMPORARILY_REJECTED: return "TEMPORARILY_REJECTED";
+            case mavlink20.MAV_RESULT_DENIED: return "DENIED";
+            case mavlink20.MAV_RESULT_UNSUPPORTED: return "UNSUPPORTED";
+            case mavlink20.MAV_RESULT_FAILED: return "FAILED";
+            case mavlink20.MAV_RESULT_IN_PROGRESS: return "IN_PROGRESS";
+            case mavlink20.MAV_RESULT_CANCELLED: return "CANCELLED";
+            default: return "RESULT " + code;
+        }
+    }
+
 
     // Telemetry state
     let telemetry = {
@@ -112,6 +141,7 @@
         );
 
         const pkt = payload.pack(MAVLink);
+        try { PendingAcks.add(cmd); } catch {}
         ws.send(Uint8Array.from(pkt));
     }
 
@@ -892,6 +922,25 @@
                 MapManager.updateTargetPosition(lat, lon);
             } else {
                 MapManager.clearTargetPosition();
+            }
+        }
+
+        // Command acknowledgements
+        if (m._name === "COMMAND_ACK") {
+            if (gcsSystemId == m.target_system &&
+                gcsComponentId == m.target_component) {
+                // Optional: check we were expecting this command
+                if (PendingAcks.has(m.command)) {
+                    if (m.result !== mavlink20.MAV_RESULT_IN_PROGRESS) {
+                        PendingAcks.delete(m.command);
+                        if (m.result !== mavlink20.MAV_RESULT_ACCEPTED) {
+                            const msg = `CMD ${mavCmdName(m.command)}: ${mavResultName(m.result)}`;
+                            // Log to STATUSTEXT panel and show a bottom-of-map toast
+                            try { StatusLog.push(mavlink20.MAV_SEVERITY_ERROR ?? 3, msg); } catch {}
+                            try { window.GCSUtils.toast(msg, 3000); } catch {}
+                        }
+                    }
+                }
             }
         }
 
