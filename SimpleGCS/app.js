@@ -610,8 +610,8 @@
             pass: "gcs.passphrase"
         };
 
-        urlInput.value = localStorage.getItem(LS_KEYS.url) || "wss://anusc.tridgell.net:20001";
-        passphraseInput.value = localStorage.getItem(LS_KEYS.pass) || "";
+        urlInput.value = localStorage.getItem(LS_KEYS.url) || "wss://support.ardupilot.org:11099";
+        passphraseInput.value = localStorage.getItem(LS_KEYS.pass) || "demo2025";
 
         function applyIds() {
             let sid = parseInt(sysInput.value || "255", 10);
