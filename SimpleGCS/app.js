@@ -22,6 +22,10 @@
     let lastConnectionUrl = null;
     let doneConnect = false;
 
+    // Link health tracking
+    let lastRxMs = 0;
+    let linkHealthTimer = null;
+
     // Messages dictionary
     let messages = {};
     // Track pending command ACKs (by MAV_CMD id)
@@ -631,6 +635,38 @@
             else button.style.background = "";
         }
 
+
+        function startLinkHealthMonitor() {
+            if (linkHealthTimer) return;
+            linkHealthTimer = setInterval(() => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    connectBtn.style.background = "";
+                    connectBtn.textContent = "Connect";
+                    return;
+                }
+                const now = Date.now();
+                const lagMs = now - (lastRxMs || now);
+                if (lagMs > 3000) {
+                    const secs = Math.round(lagMs / 1000);
+                    connectBtn.style.background = "#e53935";
+                    connectBtn.textContent = `Connect (${secs}s)`;
+                } else {
+                    connectBtn.style.background = "#00c853";
+                    connectBtn.textContent = "Connect";
+                }
+            }, 500);
+        }
+
+        function stopLinkHealthMonitor() {
+            if (linkHealthTimer) {
+                clearInterval(linkHealthTimer);
+                linkHealthTimer = null;
+            }
+            connectBtn.style.background = "";
+            connectBtn.textContent = "Connect";
+        }
+
+
         function startHeartbeatLoop() {
             if (hbInterval) {
                 clearInterval(hbInterval);
@@ -687,6 +723,8 @@
                     reconnectTimer = null;
                 }
                 startHeartbeatLoop();
+                lastRxMs = Date.now();
+                startLinkHealthMonitor();
                 window.GCSUtils.toast("Connected");
             };
 
@@ -706,6 +744,7 @@
                 Fence.onDisconnected();
                 Mission.onDisconnected();
                 FTPManager.clearLink();
+                stopLinkHealthMonitor();
 
                 if (!intentionalDisconnect) {
                     setConnState("error");
@@ -825,6 +864,8 @@
             const m = MAVLink.parseChar(null);
             if (m === null) break;
             if (m._id == -1) continue;
+
+            lastRxMs = Date.now();
 
             // Update messages dictionary
             if (!(m.sysid in messages)) {
