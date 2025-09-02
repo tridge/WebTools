@@ -21,7 +21,7 @@ function mavStr(chars) {
 // Vehicle classification
 function classifyVehicle(mavType) {
     if (mavType === mavlink20.MAV_TYPE_SURFACE_BOAT) return "boat";
-    if (mavType === mavType === mavlink20.MAV_TYPE_GROUND_ROVER) return "rover";
+    if (mavType === mavlink20.MAV_TYPE_GROUND_ROVER) return "rover";
     if (mavType === mavlink20.MAV_TYPE_FIXED_WING) return "plane";
     if (mavType === mavlink20.MAV_TYPE_QUADROTOR ||
         mavType === mavlink20.MAV_TYPE_COAXIAL ||
