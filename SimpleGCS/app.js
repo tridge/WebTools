@@ -646,7 +646,18 @@
                 }
                 const now = Date.now();
                 const lagMs = now - (lastRxMs || now);
-                if (lagMs > 3000) {
+
+                // If we've had no MAVLink packets for >15s, force a reconnect
+                if (lagMs > 15000) {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        try { console.warn("No MAVLink for 15s; forcing reconnect");
+                              ws.close(1011, "link stall");
+                              ws = null;
+                            } catch (e) {}
+                    }
+                    return; // onclose will schedule reconnect and reset UI
+                }
+if (lagMs > 3000) {
                     const secs = Math.round(lagMs / 1000);
                     connectBtn.style.background = "#e53935";
                     connectBtn.textContent = `Connect (${secs}s)`;
