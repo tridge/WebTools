@@ -734,10 +734,13 @@ if (lagMs > 3000) {
                     reconnectTimer = null;
                 }
                 startHeartbeatLoop();
+                // Keep module links in sync immediately on open
+                try { FTPManager.setLink(MAVLink, ws, vehSysId, vehCompId); } catch {}
+                try { Fence.onConnected(ws); } catch {}
+                try { Mission.onConnected(ws); } catch {}
                 lastRxMs = Date.now();
                 startLinkHealthMonitor();
-                window.GCSUtils.toast("Connected");
-            };
+                window.GCSUtils.toast("Connected");};
 
             ws.onerror = (error) => {
                 console.log("WebSocket error:", error);
