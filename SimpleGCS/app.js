@@ -65,7 +65,8 @@
         speed: 0,
         lastUpdate: 0,
         armed: false,
-        modeName: "—"
+        modeName: "—",
+        numSats: null
     };
 
     // --- AppSettings (persisted) ---
@@ -73,7 +74,8 @@
         const LS = {
             tiles: "gcs.tiles.provider",
             autoFence: "gcs.auto.fetchFence",
-            autoMission: "gcs.auto.fetchMission"
+            autoMission: "gcs.auto.fetchMission",
+            showGPSNumSats: "gcs.display.showGPSNumSats"
         };
 
         function get(key, def) {
@@ -91,13 +93,15 @@
         const state = {
             tiles: get(LS.tiles, "google-hybrid"),
             autoFetchFence: getBool(LS.autoFence, true),
-            autoFetchMission: getBool(LS.autoMission, false)
+            autoFetchMission: getBool(LS.autoMission, false),
+            showGPSNumSats: getBool(LS.showGPSNumSats, false)
         };
 
         function save() {
             localStorage.setItem(LS.tiles, state.tiles);
             localStorage.setItem(LS.autoFence, state.autoFetchFence ? "1" : "0");
             localStorage.setItem(LS.autoMission, state.autoFetchMission ? "1" : "0");
+            localStorage.setItem(LS.showGPSNumSats, state.showGPSNumSats ? "1" : "0");
         }
 
         return {
@@ -107,6 +111,8 @@
             set autoFetchFence(v) { state.autoFetchFence = !!v; save(); },
             get autoFetchMission() { return state.autoFetchMission; },
             set autoFetchMission(v) { state.autoFetchMission = !!v; save(); },
+            get showGPSNumSats() { return state.showGPSNumSats; },
+            set showGPSNumSats(v) { state.showGPSNumSats = !!v; save(); },
             save, state
         };
     })();
@@ -220,6 +226,14 @@
             <div style="opacity: 0.7; margin-bottom: 2px;">SPEED</div>
             <div id="speed-value" style="font-size: 14px; font-weight: bold;">--- knots</div>
         `;
+        // GPS display
+        const gpsDiv = document.createElement("div");
+        gpsDiv.id = "gps-display";
+        gpsDiv.style.cssText = "margin-top: 6px;";
+        gpsDiv.innerHTML = `
+            <div style="opacity: 0.7; margin-bottom: 2px;">GPS</div>
+            <div id="gps-sats-value" style="font-size: 14px; font-weight: bold;">— sats</div>
+        `;
 
         // LTE display
         const lteDiv = document.createElement("div");
@@ -233,10 +247,13 @@
 
         telemetryDiv.appendChild(batteryDiv);
         telemetryDiv.appendChild(speedDiv);
+        telemetryDiv.appendChild(gpsDiv);
         telemetryDiv.appendChild(lteDiv);
 
         const spacer = toolbar.querySelector('div[style*="flex:1"]');
         toolbar.insertBefore(telemetryDiv, spacer);
+        const gpsWrapInit = document.getElementById("gps-display");
+        if (gpsWrapInit) gpsWrapInit.style.display = AppSettings.showGPSNumSats ? "block" : "none";
     }
 
     function updateTelemetryDisplay() {
@@ -245,6 +262,8 @@
         const speedEl = document.getElementById("speed-value");
         const armedEl = document.getElementById("armed-pill");
         const modeEl = document.getElementById("mode-value");
+        const gpsWrap = document.getElementById("gps-display");
+        const gpsEl = document.getElementById("gps-sats-value");
 
         // Battery
         if (batteryEl) {
@@ -291,6 +310,18 @@
         }
 
         if (modeEl) modeEl.textContent = telemetry.modeName || "—";
+        // GPS NumSats
+        if (gpsWrap) gpsWrap.style.display = AppSettings.showGPSNumSats ? "block" : "none";
+        if (gpsEl && AppSettings.showGPSNumSats) {
+            if (typeof telemetry.numSats === "number") {
+                gpsEl.textContent = `${telemetry.numSats} sats`;
+                gpsEl.style.color = (telemetry.numSats >= 20) ? "#4caf50" : "#fff";
+            } else {
+                gpsEl.textContent = "— sats";
+                gpsEl.style.color = "#fff";
+            }
+        }
+
     }
 
     function updateLTE() {
@@ -537,6 +568,11 @@
 
         displaySection.appendChild(showGrid.wrap);
         displaySection.appendChild(showLocation.wrap);
+        const showGPS = mkChk("show-gps-sats", "Show GPS NumSats", AppSettings.showGPSNumSats, (e) => {
+            AppSettings.showGPSNumSats = e.target.checked;
+            updateTelemetryDisplay();
+        });
+        displaySection.appendChild(showGPS.wrap);
 
         // Auto-fetch section
         const autoSection = document.createElement("div");
@@ -961,6 +997,14 @@ if (lagMs > 3000) {
             telemetry.lastUpdate = Date.now();
             telemetry.currentA = m.current_battery / 100.0;
             updateTelemetryDisplay();
+        }
+
+        // GPS status
+        if (m._name === "GPS_RAW_INT" || m._name === "GPS2_RAW") {
+            if (typeof m.satellites_visible === "number") {
+                telemetry.numSats = m.satellites_visible;
+                updateTelemetryDisplay();
+            }
         }
 
         // System status
