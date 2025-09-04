@@ -45,8 +45,8 @@
             color,
             fillColor: color,
             fillOpacity: 0,
-            weight: enabled ? 2 : 2,
-            opacity: enabled ? 1 : 0.9,
+            weight: 4,
+            opacity: 1,
             dashArray: enabled ? null : "6,6"   // dashed when disabled
         };
     }
