@@ -45,7 +45,7 @@
             color,
             fillColor: color,
             fillOpacity: 0,
-            weight: 4,
+            weight: enabled? 6 : 3,
             opacity: 1,
             dashArray: enabled ? null : "6,6"   // dashed when disabled
         };
