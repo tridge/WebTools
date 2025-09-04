@@ -89,7 +89,7 @@
         }
 
         const state = {
-            tiles: get(LS.tiles, "osm"),
+            tiles: get(LS.tiles, "google-hybrid"),
             autoFetchFence: getBool(LS.autoFence, true),
             autoFetchMission: getBool(LS.autoMission, false)
         };
