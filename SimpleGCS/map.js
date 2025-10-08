@@ -15,6 +15,7 @@
         
         // Base layer management
         _baseLayer: null,
+        _googleMapsReady: false,
         
         // Initialize the map
         init(containerId = "map") {
@@ -70,7 +71,7 @@
             }
         },
 
-        applyTileProvider() {
+        async applyTileProvider() {
             this._removeBase();
             const provider = window.AppSettings ? window.AppSettings.tiles : "osm";
 
@@ -115,13 +116,22 @@
             };
 
             if (MUTANT_TYPES[provider]) {
-                if (L.gridLayer && L.gridLayer.googleMutant) {
-                    this._baseLayer = L.gridLayer.googleMutant({ 
-                        type: MUTANT_TYPES[provider] 
-                    }).addTo(this.map);
-                    return;
-                } else {
-                    window.GCSUtils.toast("Google layers need Leaflet.GoogleMutant + Google Maps API; falling back to OSM");
+                try {
+                    // Load Google Maps API asynchronously
+                    if (!this._googleMapsReady) {
+                        await (window.GMapsLoader?.load(window.GMAPS_API_KEY));
+                        this._googleMapsReady = true;
+                    }
+                    
+                    if (L.gridLayer && L.gridLayer.googleMutant) {
+                        this._baseLayer = L.gridLayer.googleMutant({ 
+                            type: MUTANT_TYPES[provider] 
+                        }).addTo(this.map);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("Google Maps failed to load, falling back to OSM:", e);
+                    // Fall through to OSM fallback
                 }
             }
 

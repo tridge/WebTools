@@ -72,6 +72,52 @@ const roverModeNames = Object.fromEntries(
     Object.entries(roverModes).map(([k, v]) => [v, k])
 );
 
+// Google Maps async loader
+(function () {
+    let loadPromise = null;
+    
+    window.GMapsLoader = {
+        load(apiKey) {
+            if (window.google && window.google.maps) {
+                return Promise.resolve();
+            }
+            
+            if (loadPromise) {
+                return loadPromise;
+            }
+            
+            loadPromise = new Promise((resolve, reject) => {
+                const k = apiKey || window.GMAPS_API_KEY;
+                if (!k) {
+                    return reject(new Error('GMAPS_API_KEY missing'));
+                }
+                
+                // Set up callback BEFORE creating script
+                window.__onGMapsLoaded = () => {
+                    delete window.__onGMapsLoaded;
+                    resolve();
+                };
+                
+                const s = document.createElement('script');
+                // CRITICAL: Use loading=async to avoid the warning
+                s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(k)}&libraries=places&loading=async&callback=__onGMapsLoaded`;
+                s.async = true;
+                s.defer = true;
+                
+                s.onerror = (e) => {
+                    delete window.__onGMapsLoaded;
+                    loadPromise = null;
+                    reject(e);
+                };
+                
+                document.head.appendChild(s);
+            });
+            
+            return loadPromise;
+        }
+    };
+})();
+
 // Export utilities to global scope
 window.GCSUtils = {
     toast,
