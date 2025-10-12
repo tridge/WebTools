@@ -682,12 +682,8 @@ class MissionParser {
 
     // parse as a set of fences
     parseFence(data) {
-
         try {
             var items = this.parseMissionItems(data);
-            if (!items || !items.length) {
-                throw new Error("No mission items to parse as fence");
-            }
             var fences = [];
             var idx = 0;
             while (idx < items.length) {
@@ -697,23 +693,22 @@ class MissionParser {
                 if (item.command === mavlink20.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION ||
                     item.command === mavlink20.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION) {
                     fitem.radius = item.param1;
-                    fitem.center = { lat: item.x / 1.0e7, lng: item.y / 1.0e7 };
-                    idx += 1;
-                    console.log("CIRCLE!");
+                    fitem.lat = item.x / 1.0e7;
+                    fitem.lng = item.y / 1.0e7;
+                    idx++;
                 } else if (item.command === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION ||
                            item.command === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION) {
                     const num_vertices = item.param1;
                     fitem.vertices = [];
                     fitem.vertex_count = num_vertices;
-                    for (var i = 1; i <= num_vertices && (idx + i) < items.length; i++) {
-                        var lat = items[idx + i].x / 1.0e7;
-                        var lng = items[idx + i].y / 1.0e7;
-                        console.log(idx, i, lat,lng);
+                    for (var i = 0; i < num_vertices; i++) {
+                        var lat = items[idx+i].x / 1.0e7;
+                        var lng = items[idx+i].y / 1.0e7;
                         fitem.vertices.push({ lat, lng });
                     }
-                    idx += (num_vertices + 1);
+                    idx += num_vertices;
                 } else {
-                    idx += 1;
+                    idx++;
                 }
                 fences.push(fitem);
             }
@@ -722,7 +717,6 @@ class MissionParser {
             console.error("Error parsing fence data:", e);
             return null;
         }
-
     }
 
     // parse as a mission
