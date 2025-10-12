@@ -56,6 +56,8 @@ global.window = global;
 
 require('../modules/MAVLink/mavftp.js'); // attaches window.MAVFTP
 
+let heartbeat_interval;
+
 ws.on('open', () => {
     console.log('WS: connected ->', url);
     heartbeat_interval = setInterval(() => {
@@ -100,7 +102,7 @@ function mav_pretty(msg) {
     return `${name} { ${fields} }`;
 }
 
-const ftp = new window.MAVFTP(parser,ws);
+const ftp = new window.MAVFTP(parser, ws);
 ftp.targetSystem = targetSystem;
 ftp.targetComponent = targetComponent;
 
@@ -127,11 +129,15 @@ ws.on('message', (data) => {
                         ftp.targetSystem = vehSysId;
                         ftp.targetComponent = vehCompId;
                         ftp.getFile(ftp_path, (data) => {
-                            if (!data) { if (!silent) toast('Failed to fetch fence'); return; }
-                            console.log("Fetched file");
+                            if (!data) { 
+                                console.error('Failed to fetch file'); 
+                                process.exit(1);
+                            }
+                            console.log("Fetched file successfully");
                             fs.writeFileSync(save_path, data);
+                            console.log(`File saved to ${save_path}`);
                             process.exit(0);
-                        }, { dropQueuedTag: true, dropQueuedPath: true, timeoutMs: 5000 });
+                        });
                     }
                 }
             }
@@ -143,7 +149,9 @@ ws.on('message', (data) => {
 
 ws.on('close', () => {
     console.log("WebSocket closed");
-    clearInterval(heartbeat_interval);
+    if (heartbeat_interval) {
+        clearInterval(heartbeat_interval);
+    }
 });
 
 ws.on('error', (err) => {
