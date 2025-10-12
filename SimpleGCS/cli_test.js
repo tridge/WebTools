@@ -7,7 +7,7 @@ global.jspack = new (require('../modules/MAVLink/local_modules/jspack/jspack.js'
 const mavlib = require('../modules/MAVLink/mavlink.js');  // Use local MAVLink definition
 
 if (process.argv.length < 3) {
-    console.error("Usage: node ws_mavlink.js <WebSocket URL>");
+    console.error("Usage: node cli_test.js <WebSocket URL>");
     process.exit(1);
 }
 
