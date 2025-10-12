@@ -129,8 +129,15 @@
   <!-- HLS for browsers without native HLS (Chrome/Firefox/Android) -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
-  <!-- Set Google Maps API key before loading util.js -->
-  <script>window.GMAPS_API_KEY="AIzaSyAZDA1bQbYC_xR5KcLW3RrUdf22aYbTvzg";</script>
+  <script src="config.js"></script>
+
+  <!-- Before util.js loads, check for stored key -->
+  <script>
+    // Try to load API key from: config.js → localStorage → empty
+    window.GMAPS_API_KEY = window.GMAPS_API_KEY ||
+    localStorage.getItem('gcs.gmaps.apikey') ||
+    "";
+  </script>
 
   <!-- Utility modules (load first) -->
   <script src="util.js"></script>

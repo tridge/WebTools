@@ -495,42 +495,78 @@
 
     // Settings dialog
     function openSettingsTip(anchorEl) {
-        const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex; flex-direction:column; gap:12px; min-width:280px;";
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex; flex-direction:column; gap:12px; min-width:280px;";
 
-        // Map tiles section
-        const tilesSection = document.createElement("div");
-        tilesSection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:4px;">Map Tiles</label>`;
-        const select = document.createElement("select");
-        select.style.cssText = "width:100%; padding:6px;";
+    // Map tiles section
+    const tilesSection = document.createElement("div");
+    tilesSection.innerHTML = `<label style="display:block; font-weight:600; margin-bottom:4px;">Map Tiles</label>`;
+    const select = document.createElement("select");
+    select.style.cssText = "width:100%; padding:6px;";
 
-        [
-            ["osm", "OpenStreetMap (default)"],
-            ["opentopomap", "OpenTopoMap"],
-            ["carto-light", "Carto Light"],
-            ["carto-dark", "Carto Dark"],
-            ["esri-world-imagery", "Esri World Imagery (Satellite)"],
-            ["au-ga-topo", "Australia — Geoscience Topographic"],
-            ["uk-os-opendata", "UK — Ordnance Survey OpenData"],
-            ["google", "Google Maps (Roadmap)"],
-            ["google-terrain", "Google Maps (Terrain)"],
-            ["google-satellite", "Google Maps (Satellite)"],
-            ["google-hybrid", "Google Maps (Hybrid)"]
-        ].forEach(([val, label]) => {
-            const opt = document.createElement("option");
-            opt.value = val;
-            opt.textContent = label;
-            if (AppSettings.tiles === val) opt.selected = true;
-            select.appendChild(opt);
-        });
+    const allProviders = [
+        ["osm", "OpenStreetMap (default)"],
+        ["opentopomap", "OpenTopoMap"],
+        ["carto-light", "Carto Light"],
+        ["carto-dark", "Carto Dark"],
+        ["esri-world-imagery", "Esri World Imagery (Satellite)"],
+        ["au-ga-topo", "Australia — Geoscience Topographic"],
+        ["uk-os-opendata", "UK — Ordnance Survey OpenData"],
+        ["google", "Google Maps (Roadmap)"],
+        ["google-terrain", "Google Maps (Terrain)"],
+        ["google-satellite", "Google Maps (Satellite)"],
+        ["google-hybrid", "Google Maps (Hybrid)"]
+    ];
 
-        // Apply tile changes immediately
-        select.onchange = () => {
-            AppSettings.tiles = select.value;
-            MapManager.applyTileProvider();
-        };
+    // Filter out Google options if no API key
+    const hasGoogleKey = window.GMAPS_API_KEY && window.GMAPS_API_KEY.length > 0;
+    const availableProviders = allProviders.filter(([val]) =>
+        hasGoogleKey || !val.startsWith('google')
+    );
 
-        tilesSection.appendChild(select);
+    availableProviders.forEach(([val, label]) => {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (AppSettings.tiles === val) opt.selected = true;
+        select.appendChild(opt);
+    });
+
+    // If current setting is Google but no key, switch to OSM
+    if (!hasGoogleKey && AppSettings.tiles.startsWith('google')) {
+        AppSettings.tiles = 'osm';
+        MapManager.applyTileProvider();
+    }
+
+    // Apply tile changes immediately
+    select.onchange = () => {
+        AppSettings.tiles = select.value;
+        MapManager.applyTileProvider();
+    };
+
+    tilesSection.appendChild(select);
+
+    // Add API key configuration section
+    const apiSection = document.createElement("div");
+    apiSection.innerHTML = `
+        <label style="display:block; font-weight:600; margin-bottom:4px;">Google Maps API Key</label>
+        <input type="text" id="gmaps-key-input" placeholder="Enter API key (optional)"
+               value="${window.GMAPS_API_KEY || ''}"
+               style="width:100%; padding:6px; margin-bottom:4px;">
+        <small style="opacity:0.7; font-size:11px;">
+            Leave empty to use only free tile sources.
+            <a href="https://developers.google.com/maps/documentation/javascript/get-api-key"
+               target="_blank" style="color:#1976d2;">Get a key</a>
+        </small>
+    `;
+
+    const keyInput = apiSection.querySelector('#gmaps-key-input');
+    keyInput.onchange = () => {
+        const newKey = keyInput.value.trim();
+        localStorage.setItem('gcs.gmaps.apikey', newKey);
+        window.GMAPS_API_KEY = newKey;
+        window.GCSUtils.toast("API key saved. Refresh page to apply.");
+    };
 
         // Display options section
         const displaySection = document.createElement("div");
