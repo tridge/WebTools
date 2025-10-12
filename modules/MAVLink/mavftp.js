@@ -55,13 +55,28 @@ class MAVFTP {
 	    this.readGaps = [];
 	    this.readGapTimes = new Map();
 	    this.expectedOffset = 0;
+	    this.maxOffsetReceived = 0; // Track highest offset+size received during burst
 	    this.reachedEOF = false;
-	    this.expectedOffset = 0;
-	    this.readGapTimes = new Map();
+	    this.fileSize = 0; // Track actual file size
 	    this.burstSize = 80;
 	    this.lastOp = null;
 	    this.opStartTime = null;
 	    this.callback = null;
+
+	    // Timeout settings
+	    this.readGapTimeout = 1000; // 2 second timeout for gap reads
+	    this.burstReadTimeout = 3000; // 3 second timeout for burst reads
+	    this.openFileTimeout = 3000; // 3 second timeout for open file
+	    this.timeoutCheckInterval = null;
+        this.maxGapRetries = 20;
+	    this.maxBurstRetries = 5;
+        this.maxOpenRetries = 5;
+	    this.maxConcurrentReads = 5; // Allow up to 5 gap reads in flight at once
+
+	    // Track pending operations
+	    this.pendingOpenFile = null; // { filename, sentTime, retries }
+	    this.pendingBurstRead = null; // { offset, sentTime, retries }
+	    this.lastBurstResponseTime = 0; // Time of last burst response received
 
 	    this.HDR_LEN = 12;
 	    this.MAX_PAYLOAD = 239;
@@ -151,6 +166,24 @@ class MAVFTP {
 	    this.seq = (this.seq + 1) % 256;
     }
 
+    // Send burst read and track it
+    sendBurstRead(offset) {
+	    this.sendOp(this.OP.BurstReadFile, this.burstSize, 0, 0, offset, null);
+
+	    // Track this burst read request
+	    if (!this.pendingBurstRead) {
+	        this.pendingBurstRead = {
+	            offset: offset,
+	            sentTime: Date.now(),
+	            retries: 0
+	        };
+	    } else {
+	        // Update offset for new burst request
+	        this.pendingBurstRead.offset = offset;
+	        this.pendingBurstRead.sentTime = Date.now();
+	    }
+    }
+
     // Helper to get operation name for debugging
     getOpName(opcode) {
 	    for (let [name, code] of Object.entries(this.OP)) {
@@ -168,10 +201,150 @@ class MAVFTP {
 	    this.readGaps = [];
 	    this.readGapTimes = new Map();
 	    this.expectedOffset = 0;
+	    this.maxOffsetReceived = 0;
 	    this.reachedEOF = false;
-	    this.expectedOffset = 0;
-	    this.readGapTimes = new Map();
+	    this.fileSize = 0;
+	    this.pendingOpenFile = null;
+	    this.pendingBurstRead = null;
+	    this.lastBurstResponseTime = 0;
+
+	    // Clear timeout check interval
+	    if (this.timeoutCheckInterval) {
+	        clearInterval(this.timeoutCheckInterval);
+	        this.timeoutCheckInterval = null;
+	    }
+
 	    console.log("FTP: Session terminated");
+    }
+
+    // Reset session without clearing transfer state (for retrying open)
+    resetSession() {
+	    console.log("FTP: Resetting session");
+	    this.sendOp(this.OP.TerminateSession, 0, 0, 0, 0, null);
+	    this.session = (this.session + 1) % 256;
+	    this.pendingBurstRead = null;
+	    this.lastBurstResponseTime = 0;
+    }
+
+    // Add any missing chunks as gaps
+    addMissingGaps() {
+	    // Use maxOffsetReceived as the starting point since expectedOffset may not have advanced
+	    const startOffset = this.maxOffsetReceived;
+
+	    if (this.fileSize === 0 || startOffset >= this.fileSize) {
+	        return;
+	    }
+
+	    console.log(`FTP: Adding missing gaps from offset ${startOffset} to ${this.fileSize}`);
+
+	    let gapLen = this.fileSize - startOffset;
+	    let ofs = startOffset;
+	    while (gapLen > 0) {
+	        const chunk = Math.min(this.burstSize, gapLen);
+	        // Check if this gap already exists to prevent duplicates
+	        const exists = this.readGaps.some(g => g.offset === ofs);
+	        if (!exists) {
+	            this.readGaps.push({ offset: ofs, length: chunk, sent: false, retries: 0 });
+	            this.readGapTimes.set(ofs, 0);
+	            console.log(`FTP: Added gap at offset ${ofs}, length ${chunk}`);
+	        }
+	        ofs += chunk;
+	        gapLen -= chunk;
+	    }
+
+	    // Start sending gap reads immediately
+	    this.checkReadSend();
+    }
+
+    // Check for timed-out operations and retry them
+    checkTimeouts() {
+	    const now = Date.now();
+
+	    // Check for timed-out open file request
+	    if (this.pendingOpenFile) {
+	        const elapsed = now - this.pendingOpenFile.sentTime;
+	        if (elapsed > this.openFileTimeout) {
+	            console.log(`FTP: OpenFileRO timed out (${elapsed}ms)`);
+
+	            this.pendingOpenFile.retries++;
+	            if (this.pendingOpenFile.retries > this.maxOpenRetries) {
+	                console.error(`FTP: OpenFileRO exceeded max retries, aborting transfer`);
+	                if (this.callback) this.callback(null);
+	                this.terminateSession();
+	                return;
+	            }
+
+	            console.log(`FTP: Retrying OpenFileRO (attempt ${this.pendingOpenFile.retries})`);
+
+	            // Reset session before retrying - the server may have processed the first request
+	            // but the ACK was lost, so we need a fresh session
+	            this.resetSession();
+
+	            // Resend OpenFileRO with new session
+	            const encoder = new TextEncoder();
+	            const filenameBytes = encoder.encode(this.pendingOpenFile.filename);
+	            this.sendOp(this.OP.OpenFileRO, filenameBytes.length, 0, 0, 0, filenameBytes);
+	            this.pendingOpenFile.sentTime = now;
+	        }
+	    }
+
+	    // Check for timed-out burst read - only timeout if no burst responses received recently
+	    if (this.pendingBurstRead && !this.reachedEOF) {
+	        const timeSinceLastResponse = now - this.lastBurstResponseTime;
+
+	        if (timeSinceLastResponse > this.burstReadTimeout) {
+	            console.log(`FTP: Burst read timed out (no response for ${timeSinceLastResponse}ms)`);
+
+	            this.pendingBurstRead.retries++;
+	            if (this.pendingBurstRead.retries > this.maxBurstRetries) {
+	                console.error(`FTP: Burst read exceeded max retries, aborting transfer`);
+	                if (this.callback) this.callback(null);
+	                this.terminateSession();
+	                return;
+	            }
+
+	            console.log(`FTP: Retrying burst read at offset ${this.pendingBurstRead.offset} (attempt ${this.pendingBurstRead.retries})`);
+	            this.sendBurstRead(this.pendingBurstRead.offset);
+	        }
+	    }
+
+	    // Check for timed-out gap reads
+	    if (this.readGaps.length === 0) {
+	        return;
+	    }
+
+	    let needsRetry = false;
+
+	    for (const gap of this.readGaps) {
+	        if (gap.sent) {
+	            const sentTime = this.readGapTimes.get(gap.offset) || 0;
+	            const elapsed = now - sentTime;
+
+	            // Check if this gap has timed out
+	            if (elapsed > this.readGapTimeout) {
+	                console.log(`FTP: Gap at offset ${gap.offset} timed out (${elapsed}ms), retrying`);
+
+	                // Track retries
+	                gap.retries = (gap.retries || 0) + 1;
+
+	                if (gap.retries > this.maxGapRetries) {
+	                    console.error(`FTP: Gap at offset ${gap.offset} exceeded max retries, aborting transfer`);
+	                    if (this.callback) this.callback(null);
+	                    this.terminateSession();
+	                    return;
+	                }
+
+	                // Reset sent flag so it can be retried
+	                gap.sent = false;
+	                needsRetry = true;
+	            }
+	        }
+	    }
+
+	    // If any gaps were reset, try sending the next one
+	    if (needsRetry) {
+	        this.checkReadSend();
+	    }
     }
 
     // Get file from vehicle
@@ -185,16 +358,31 @@ class MAVFTP {
 	    this.readGaps = [];
 	    this.readGapTimes = new Map();
 	    this.expectedOffset = 0;
+	    this.maxOffsetReceived = 0;
 	    this.reachedEOF = false;
-	    this.expectedOffset = 0;
-	    this.readGapTimes = new Map();
+	    this.fileSize = 0;
+	    this.pendingBurstRead = null;
+	    this.lastBurstResponseTime = 0;
 	    this.opStartTime = Date.now();
+
+	    // Start periodic timeout checking
+	    if (this.timeoutCheckInterval) {
+	        clearInterval(this.timeoutCheckInterval);
+	    }
+	    this.timeoutCheckInterval = setInterval(() => {
+	        this.checkTimeouts();
+	    }, 500); // Check every 500ms
 
 	    // Encode filename
 	    const encoder = new TextEncoder();
 	    const filenameBytes = encoder.encode(filename);
 
-	    // Send OpenFileRO
+	    // Send OpenFileRO and track it
+	    this.pendingOpenFile = {
+	        filename: filename,
+	        sentTime: Date.now(),
+	        retries: 0
+	    };
 	    this.sendOp(this.OP.OpenFileRO, filenameBytes.length, 0, 0, 0, filenameBytes);
     }
 
@@ -229,13 +417,35 @@ class MAVFTP {
     // Handle OpenFileRO response
     handleOpenResponse(op) {
 	    if (op.opcode === this.OP.Ack) {
+	        // Clear pending open file since we got a successful response
+	        this.pendingOpenFile = null;
+
 	        console.log("FTP: File opened, starting burst read");
 	        // Start burst read from offset 0
-	        this.sendOp(this.OP.BurstReadFile, this.burstSize, 0, 0, 0, null);
+	        this.sendBurstRead(0);
+	        this.lastBurstResponseTime = Date.now();
 	    } else if (op.opcode === this.OP.Nack) {
-	        console.error("FTP: Failed to open file - NACK received");
-	        if (this.callback) this.callback(null);
-	        this.terminateSession();
+	        console.log("FTP: Received NACK to OpenFileRO");
+
+	        // If we have pending open and retries left, reset session and retry
+	        if (this.pendingOpenFile && this.pendingOpenFile.retries < this.maxOpenRetries) {
+	            this.pendingOpenFile.retries++;
+	            console.log(`FTP: Retrying OpenFileRO after NACK (attempt ${this.pendingOpenFile.retries})`);
+
+	            // Reset session - the NACK likely means the session was already open
+	            this.resetSession();
+
+	            // Resend OpenFileRO with new session
+	            const encoder = new TextEncoder();
+	            const filenameBytes = encoder.encode(this.pendingOpenFile.filename);
+	            this.sendOp(this.OP.OpenFileRO, filenameBytes.length, 0, 0, 0, filenameBytes);
+	            this.pendingOpenFile.sentTime = Date.now();
+	        } else {
+	            console.error("FTP: Failed to open file - NACK received (max retries exceeded or no pending open)");
+	            this.pendingOpenFile = null;
+	            if (this.callback) this.callback(null);
+	            this.terminateSession();
+	        }
 	    } else {
 	        console.error(`FTP: Unexpected response to OpenFileRO: opcode ${op.opcode}`);
 	    }
@@ -243,6 +453,9 @@ class MAVFTP {
 
     // Handle BurstReadFile response
     handleBurstReadResponse(op) {
+	    // Update last burst response time whenever we receive ANY burst response
+	    this.lastBurstResponseTime = Date.now();
+
 	    if (op.opcode === this.OP.Ack && op.payload) {
 	        if (!this.fileBuffer) {
 		        return;
@@ -258,18 +471,31 @@ class MAVFTP {
 	        // Write data at offset
 	        this.fileBuffer.set(op.payload, op.offset);
 
+	        // Track the highest offset we've received
+	        const endOffset = op.offset + op.size;
+	        if (endOffset > this.maxOffsetReceived) {
+	            this.maxOffsetReceived = endOffset;
+	        }
+
             // Gap tracking: if this chunk starts beyond where we expected,
             // record the missing region(s) as gaps to be filled later.
+            // Only create gaps if they don't already exist
             if (op.offset > this.expectedOffset) {
                 let gapLen = op.offset - this.expectedOffset;
                 let ofs = this.expectedOffset;
                 while (gapLen > 0) {
                     const chunk = Math.min(this.burstSize, gapLen);
-                    this.readGaps.push({ offset: ofs, length: chunk, sent: false });
-                    this.readGapTimes.set(ofs, 0);
+                    // Check if this gap already exists
+                    const exists = this.readGaps.some(g => g.offset === ofs);
+                    if (!exists) {
+                        this.readGaps.push({ offset: ofs, length: chunk, sent: false, retries: 0 });
+                        this.readGapTimes.set(ofs, 0);
+                    }
                     ofs += chunk;
                     gapLen -= chunk;
                 }
+                // Start filling gaps immediately
+                this.checkReadSend();
             }
 
             // Advance expectedOffset if we were at the expected spot
@@ -277,28 +503,44 @@ class MAVFTP {
                 this.expectedOffset = op.offset + op.size;
             }
 
-	        console.log(`FTP: Read ${op.size} bytes at offset ${op.offset}`);
+	        console.log(`FTP: Read ${op.size} bytes at offset ${op.offset}, expectedOffset now ${this.expectedOffset}`);
 
 	        // Check if we need to continue
 	        if (op.burst_complete) {
 		        if (op.size > 0 && op.size < this.burstSize) {
-		            // EOF reached
+		            // EOF reached - this is the last chunk
+		            console.log("FTP: EOF reached (short burst)");
 		            this.reachedEOF = true;
-                    this.checkReadSend();
+		            this.fileSize = op.offset + op.size;
+		            this.pendingBurstRead = null;
+
+		            // Add any missing gaps before EOF
+		            this.addMissingGaps();
+
+		            this.checkReadSend();
                     if (this.readGaps.length === 0) {
 		                this.finishTransfer();
                     }
 		        } else {
 		            // Continue reading
 		            const nextOffset = op.offset + op.size;
-		            this.sendOp(this.OP.BurstReadFile, this.burstSize, 0, 0, nextOffset, null);
+		            this.sendBurstRead(nextOffset);
 		        }
 	        }
 	    } else if (op.opcode === this.OP.Nack) {
 	        const errorCode = op.payload ? op.payload[0] : 0;
 	        if (errorCode === this.ERR.EndOfFile || errorCode === 0) {
-		        console.log("FTP: EOF reached");
+		        console.log("FTP: EOF reached (NACK)");
 		        this.reachedEOF = true;
+		        this.pendingBurstRead = null;
+
+		        // File size is the highest offset we've received
+		        this.fileSize = this.maxOffsetReceived;
+
+		        // Add any missing gaps before EOF
+		        this.addMissingGaps();
+
+                this.checkReadSend();
                 if (this.readGaps.length === 0) {
                     this.finishTransfer();
                 }
@@ -323,7 +565,8 @@ class MAVFTP {
 
 	        if (this.readGaps.length === 0 && this.reachedEOF) {
 		        this.finishTransfer();
-            } else if (this.reachedEOF) {
+            } else {
+                // Always check if we can send more gap reads to keep pipeline full
                 this.checkReadSend();
 	        }
 	    }
@@ -333,14 +576,30 @@ class MAVFTP {
     // Send the next pending gap read if needed
     checkReadSend() {
         if (this.readGaps.length === 0) return;
-        // Only send one gap request at a time; pick the first unsent
-        const next = this.readGaps.find(g => !g.sent);
-        if (!next) return;
-        // Request this gap
-        this.sendOp(this.OP.ReadFile, next.length, 0, 0, next.offset, null);
-        next.sent = true;
-        // mark time
-        this.readGapTimes.set(next.offset, Date.now());
+
+        // Count how many gap reads are currently in flight
+        const inFlight = this.readGaps.filter(g => g.sent).length;
+
+        // Send more gap reads up to the max concurrent limit
+        let toSend = this.maxConcurrentReads - inFlight;
+
+        if (toSend <= 0) return;
+
+        // Find unsent gaps and send them
+        for (const gap of this.readGaps) {
+            if (!gap.sent && toSend > 0) {
+                // Request this gap
+                this.sendOp(this.OP.ReadFile, gap.length, 0, 0, gap.offset, null);
+                gap.sent = true;
+                // mark time
+                this.readGapTimes.set(gap.offset, Date.now());
+                toSend--;
+
+                // Re-count actual in-flight for accurate logging
+                const actualInFlight = this.readGaps.filter(g => g.sent).length;
+                console.log(`FTP: Sent gap read at offset ${gap.offset}, ${actualInFlight} in flight`);
+            }
+        }
     }
 
     // Finish file transfer
@@ -348,6 +607,13 @@ class MAVFTP {
 	    if (!this.fileBuffer) {
 	        return;
 	    }
+
+	    // Clear timeout check interval
+	    if (this.timeoutCheckInterval) {
+	        clearInterval(this.timeoutCheckInterval);
+	        this.timeoutCheckInterval = null;
+	    }
+
 	    const dt = (Date.now() - this.opStartTime) / 1000;
 	    const size = this.fileBuffer.length;
 	    const rate = (size / dt) / 1024;
@@ -433,6 +699,7 @@ class MissionParser {
                     fitem.radius = item.param1;
                     fitem.center = { lat: item.x / 1.0e7, lng: item.y / 1.0e7 };
                     idx += 1;
+                    console.log("CIRCLE!");
                 } else if (item.command === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION ||
                            item.command === mavlink20.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION) {
                     const num_vertices = item.param1;
@@ -441,6 +708,7 @@ class MissionParser {
                     for (var i = 1; i <= num_vertices && (idx + i) < items.length; i++) {
                         var lat = items[idx + i].x / 1.0e7;
                         var lng = items[idx + i].y / 1.0e7;
+                        console.log(idx, i, lat,lng);
                         fitem.vertices.push({ lat, lng });
                     }
                     idx += (num_vertices + 1);
