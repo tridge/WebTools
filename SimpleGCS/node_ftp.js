@@ -22,6 +22,10 @@ const url = process.argv[2];
 const signing_passphrase = process.argv[3];
 const ftp_path = process.argv[4];
 const save_path = process.argv[5];
+let pkt_loss_pct = 0;
+if (process.argv.length > 6) {
+    pkt_loss_pct = parseInt(process.argv[6]);
+}
 
 const ws = new WebSocket(url);
 ws.binaryType = "arraybuffer";
@@ -104,15 +108,17 @@ ws.on('message', (data) => {
     const buf = (data instanceof ArrayBuffer) ? Buffer.from(data) :
                 (Buffer.isBuffer(data) ? data : Buffer.from(data.buffer || data));
 
-    console.log(`Received ${buf.length} bytes: [${buf.slice(0, 10).toString('hex')}...]`);
+    //console.log(`Received ${buf.length} bytes: [${buf.slice(0, 10).toString('hex')}...]`);
 
     for (const b of buf) {
         try {
 	    const msg = parser.parseChar(b);
             if (msg) {
-                console.log(`MAVLink message ID: ${msg._id}`);
+                //console.log(`MAVLink message ID: ${msg._id}`);
                 if (msg._name === 'FILE_TRANSFER_PROTOCOL') {
-                    ftp.handleMessage(msg);
+                    if (Math.random() * 100 >= pkt_loss_pct) {
+                        ftp.handleMessage(msg);
+                    }
                 }
                 if (msg._name === 'HEARTBEAT') {
                     if (msg.sysid != vehSysId) {
